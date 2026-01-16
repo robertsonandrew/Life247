@@ -7,11 +7,13 @@
 
 import SwiftUI
 
-/// App settings view
+/// App settings view with clean, modern design
 struct SettingsView: View {
     @ObservedObject private var airplaneMode = AirplaneModeManager.shared
     @AppStorage("showSpeedHeatMap") private var showSpeedHeatMap = false
     @AppStorage("defaultZoomLevel") private var defaultZoomLevel: String = MapZoomLevel.neighborhood.rawValue
+    @AppStorage("notifyOnStart") private var notifyOnStart = true
+    @AppStorage("notifyOnEnd") private var notifyOnEnd = true
     
     private var selectedZoomLevel: MapZoomLevel {
         MapZoomLevel(rawValue: defaultZoomLevel) ?? .neighborhood
@@ -20,109 +22,129 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Airplane Mode Toggle
+                // Global Controls
                 Section {
-                    Toggle(isOn: $airplaneMode.isEnabled) {
+                    // Airplane Mode
+                    HStack(spacing: 12) {
+                        Image(systemName: "airplane")
+                            .font(.title3)
+                            .foregroundStyle(.orange)
+                            .frame(width: 28)
+                        
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Airplane Mode")
-                            Text("Disables all detection and background processing")
+                            Text("Pause all tracking")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        
+                        Spacer()
+                        
+                        Toggle("", isOn: $airplaneMode.isEnabled)
+                            .labelsHidden()
                     }
-                } header: {
-                    Text("Global")
                 }
                 
-                // Drive Detection Settings
+                // Tracking & Locations
                 Section {
                     NavigationLink {
                         DriveDetectionSettingsView()
                     } label: {
-                        Label("Drive Detection", systemImage: "car.fill")
+                        HStack(spacing: 12) {
+                            Image(systemName: "car.fill")
+                                .font(.title3)
+                                .foregroundStyle(.blue)
+                                .frame(width: 28)
+                            Text("Drive Detection")
+                        }
+                    }
+                    
+                    NavigationLink {
+                        PlacesView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.red)
+                                .frame(width: 28)
+                            Text("Saved Places")
+                        }
                     }
                 } header: {
                     Text("Tracking")
                 }
                 
-                // Places
-                Section {
-                    NavigationLink {
-                        PlacesView()
-                    } label: {
-                        Label("Places", systemImage: "mappin.circle.fill")
-                    }
-                } header: {
-                    Text("Locations")
-                }
-                
                 // Notifications
                 Section {
-                    Toggle("Drive Started", isOn: Binding(
-                        get: { NotificationService.shared.notifyOnStart },
-                        set: { enabled in
-                            if enabled {
-                                Task {
-                                    let granted = await NotificationService.shared.requestPermissionIfNeeded()
-                                    NotificationService.shared.notifyOnStart = granted
-                                }
-                            } else {
-                                NotificationService.shared.notifyOnStart = false
+                    HStack(spacing: 12) {
+                        Image(systemName: "bell.badge.fill")
+                            .font(.title3)
+                            .foregroundStyle(.green)
+                            .frame(width: 28)
+                        Text("Drive Started")
+                        Spacer()
+                        Toggle("", isOn: $notifyOnStart)
+                            .labelsHidden()
+                            .onChange(of: notifyOnStart) { _, enabled in
+                                handleNotificationToggle(enabled: enabled, isStart: true)
                             }
-                        }
-                    ))
+                    }
                     
-                    Toggle("Drive Ended", isOn: Binding(
-                        get: { NotificationService.shared.notifyOnEnd },
-                        set: { enabled in
-                            if enabled {
-                                Task {
-                                    let granted = await NotificationService.shared.requestPermissionIfNeeded()
-                                    NotificationService.shared.notifyOnEnd = granted
-                                }
-                            } else {
-                                NotificationService.shared.notifyOnEnd = false
+                    HStack(spacing: 12) {
+                        Image(systemName: "flag.checkered")
+                            .font(.title3)
+                            .foregroundStyle(.purple)
+                            .frame(width: 28)
+                        Text("Drive Ended")
+                        Spacer()
+                        Toggle("", isOn: $notifyOnEnd)
+                            .labelsHidden()
+                            .onChange(of: notifyOnEnd) { _, enabled in
+                                handleNotificationToggle(enabled: enabled, isStart: false)
                             }
-                        }
-                    ))
+                    }
                 } header: {
                     Text("Notifications")
                 }
                 
-                // Privacy
-                Section {
-                    NavigationLink {
-                        Text("Privacy Settings")
-                            .navigationTitle("Privacy")
-                    } label: {
-                        Label("Privacy Zones", systemImage: "eye.slash.fill")
-                    }
-                } header: {
-                    Text("Privacy")
-                }
-                
                 // Display
                 Section {
-                    Toggle(isOn: $showSpeedHeatMap) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "thermometer.medium")
+                            .font(.title3)
+                            .foregroundStyle(.orange)
+                            .frame(width: 28)
+                        
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Speed Heat Map")
-                            Text("Colors route lines based on speed in history views")
+                            Text("Color routes by speed")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        
+                        Spacer()
+                        
+                        Toggle("", isOn: $showSpeedHeatMap)
+                            .labelsHidden()
                     }
                     
-                    Picker(selection: $defaultZoomLevel) {
-                        ForEach(MapZoomLevel.allCases) { level in
-                            Text(level.label).tag(level.rawValue)
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.title3)
+                            .foregroundStyle(.blue)
+                            .frame(width: 28)
+                        
+                        Text("Default Zoom")
+                        
+                        Spacer()
+                        
+                        Picker("", selection: $defaultZoomLevel) {
+                            ForEach(MapZoomLevel.allCases) { level in
+                                Text(level.label).tag(level.rawValue)
+                            }
                         }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Default Zoom")
-                            Text(selectedZoomLevel.description)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
                     }
                 } header: {
                     Text("Display")
@@ -130,22 +152,47 @@ struct SettingsView: View {
                 
                 // About
                 Section {
-                    NavigationLink {
-                        ProjectStructureView()
-                    } label: {
-                        HStack {
-                            Text("Version")
-                            Spacer()
-                            Text("1.0")
-                                .foregroundStyle(.secondary)
-                        }
+                    HStack(spacing: 12) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.gray)
+                            .frame(width: 28)
+                        Text("Version")
+                        Spacer()
+                        Text("1.0")
+                            .foregroundStyle(.secondary)
                     }
                 } header: {
                     Text("About")
                 }
             }
             .navigationTitle("Settings")
-            .contentMargins(.bottom, 160, for: .scrollContent)  // Space for expanded NavBar
+            .contentMargins(.bottom, 100, for: .scrollContent)
+        }
+    }
+    
+    // MARK: - Helpers
+    
+    private func handleNotificationToggle(enabled: Bool, isStart: Bool) {
+        if enabled {
+            Task {
+                let granted = await NotificationService.shared.requestPermissionIfNeeded()
+                await MainActor.run {
+                    if isStart {
+                        NotificationService.shared.notifyOnStart = granted
+                        if !granted { notifyOnStart = false }
+                    } else {
+                        NotificationService.shared.notifyOnEnd = granted
+                        if !granted { notifyOnEnd = false }
+                    }
+                }
+            }
+        } else {
+            if isStart {
+                NotificationService.shared.notifyOnStart = false
+            } else {
+                NotificationService.shared.notifyOnEnd = false
+            }
         }
     }
 }

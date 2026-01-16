@@ -166,6 +166,10 @@ extension LocationManager: CLLocationManagerDelegate {
             logger.debug("Location update: \(location.coordinate.latitude), \(location.coordinate.longitude) @ \(location.speed)m/s")
             eventSink?.handle(.locationUpdate(location))
             
+            // Brief delay to ensure state machine async work (timers, saves) can complete
+            // This is especially important during SLC wakes where iOS may suspend quickly
+            try? await Task.sleep(for: .milliseconds(500))
+            
             // End background task after event is processed
             if backgroundTaskID != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTaskID)

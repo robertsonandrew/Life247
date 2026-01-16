@@ -53,26 +53,24 @@ struct HistoryView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            Group {
-                if drives.isEmpty {
-                    EmptyHistoryView()
-                } else {
-                    timelineList
-                }
+        Group {
+            if drives.isEmpty {
+                EmptyHistoryView()
+            } else {
+                timelineList
             }
-            .navigationTitle("History")
-            .onAppear {
-                if timeline.isEmpty {
-                    Task { await rebuildTimeline() }
-                }
-            }
-            .onChange(of: drives.count) { _, _ in
+        }
+        .navigationTitle("History")
+        .onAppear {
+            if timeline.isEmpty {
                 Task { await rebuildTimeline() }
             }
-            .onChange(of: places.count) { _, _ in
-                Task { await rebuildTimeline() }
-            }
+        }
+        .onChange(of: drives.count) { _, _ in
+            Task { await rebuildTimeline() }
+        }
+        .onChange(of: places.count) { _, _ in
+            Task { await rebuildTimeline() }
         }
     }
     

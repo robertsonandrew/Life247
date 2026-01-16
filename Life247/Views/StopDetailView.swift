@@ -187,6 +187,7 @@ struct StopDetailView: View {
                 .padding()
             }
             .background(.ultraThinMaterial)
+            .contentMargins(.bottom, 100, for: .scrollContent)
         }
         .navigationTitle("Stop")
         .navigationBarTitleDisplayMode(.inline)

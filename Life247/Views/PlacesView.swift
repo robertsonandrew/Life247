@@ -35,6 +35,7 @@ struct PlacesView: View {
                 .onDelete(perform: deletePlaces)
             }
         }
+        .contentMargins(.bottom, 100, for: .scrollContent)
         .navigationTitle("Places")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

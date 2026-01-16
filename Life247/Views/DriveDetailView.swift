@@ -13,6 +13,7 @@ struct DriveDetailView: View {
     let drive: Drive
     
     @State private var cameraPosition: MapCameraPosition = .automatic
+    @State private var isMapExpanded = false
     
     var body: some View {
         ScrollView {
@@ -27,10 +28,14 @@ struct DriveDetailView: View {
                 detailsSection
             }
         }
+        .contentMargins(.bottom, 100, for: .scrollContent)
         .navigationTitle("Drive Details")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             setupCamera()
+        }
+        .fullScreenCover(isPresented: $isMapExpanded) {
+            ExpandedMapView(drive: drive)
         }
     }
     
@@ -39,37 +44,58 @@ struct DriveDetailView: View {
     @AppStorage("showSpeedHeatMap") private var showSpeedHeatMap = false
     
     private var mapSection: some View {
-        Map(position: $cameraPosition) {
-            // Route polyline (uses full resolution for detail view)
-            if drive.points.count > 1 {
-                RoutePolyline(
-                    points: drive.pointsChronological,
-                    mode: showSpeedHeatMap ? .heatMap : .solid,
-                    lineWidth: 5
-                )
-            }
-            
-            // Start marker
-            if let start = drive.startCoordinate {
-                Annotation("Start", coordinate: start) {
-                    Image(systemName: "play.circle.fill")
-                        .font(.title)
-                        .foregroundStyle(.green)
-                        .background(Circle().fill(.white).padding(2))
+        ZStack(alignment: .bottomTrailing) {
+            Map(position: $cameraPosition) {
+                // Route polyline (uses full resolution for detail view)
+                if drive.points.count > 1 {
+                    RoutePolyline(
+                        points: drive.pointsChronological,
+                        mode: showSpeedHeatMap ? .heatMap : .solid,
+                        lineWidth: 5
+                    )
+                }
+                
+                // Start marker
+                if let start = drive.startCoordinate {
+                    Annotation("Start", coordinate: start) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.green)
+                            .background(Circle().fill(.white).padding(2))
+                    }
+                }
+                
+                // End marker
+                if let end = drive.endCoordinate {
+                    Annotation("End", coordinate: end) {
+                        Image(systemName: "flag.checkered.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.red)
+                            .background(Circle().fill(.white).padding(2))
+                    }
                 }
             }
+            .mapStyle(.standard(elevation: .realistic))
             
-            // End marker
-            if let end = drive.endCoordinate {
-                Annotation("End", coordinate: end) {
-                    Image(systemName: "flag.checkered.circle.fill")
-                        .font(.title)
-                        .foregroundStyle(.red)
-                        .background(Circle().fill(.white).padding(2))
+            // Expand button
+            Button {
+                isMapExpanded = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Expand")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption)
                 }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
             }
+            .padding(12)
         }
-        .mapStyle(.standard(elevation: .realistic))
         .frame(height: 300)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding()
@@ -145,6 +171,139 @@ struct DriveDetailView: View {
     private func setupCamera() {
         guard let bounds = drive.routeBounds else { return }
         cameraPosition = .region(MKCoordinateRegion(center: bounds.center, span: bounds.span))
+    }
+}
+
+// MARK: - Expanded Map View
+
+struct ExpandedMapView: View {
+    let drive: Drive
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var cameraPosition: MapCameraPosition = .automatic
+    @AppStorage("showSpeedHeatMap") private var showSpeedHeatMap = false
+    
+    var body: some View {
+        ZStack {
+            // Full screen map
+            Map(position: $cameraPosition) {
+                // Route polyline
+                if drive.points.count > 1 {
+                    RoutePolyline(
+                        points: drive.pointsChronological,
+                        mode: showSpeedHeatMap ? .heatMap : .solid,
+                        lineWidth: 6
+                    )
+                }
+                
+                // Start marker
+                if let start = drive.startCoordinate {
+                    Annotation("Start", coordinate: start) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(.green)
+                            .background(Circle().fill(.white).padding(4))
+                    }
+                }
+                
+                // End marker
+                if let end = drive.endCoordinate {
+                    Annotation("End", coordinate: end) {
+                        Image(systemName: "flag.checkered.circle.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(.red)
+                            .background(Circle().fill(.white).padding(4))
+                    }
+                }
+            }
+            .mapStyle(.standard(elevation: .realistic))
+            .ignoresSafeArea()
+            
+            // Controls overlay
+            VStack {
+                // Top bar
+                HStack {
+                    // Close button
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .padding(12)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+                    
+                    Spacer()
+                    
+                    // Drive info pill
+                    HStack(spacing: 8) {
+                        Text(drive.formattedDistance)
+                        Text("•")
+                            .foregroundStyle(.secondary)
+                        Text(drive.formattedDuration)
+                    }
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    
+                    Spacer()
+                    
+                    // Heat map toggle
+                    Button {
+                        showSpeedHeatMap.toggle()
+                    } label: {
+                        Image(systemName: showSpeedHeatMap ? "thermometer.high" : "thermometer.low")
+                            .font(.headline)
+                            .foregroundStyle(showSpeedHeatMap ? .orange : .primary)
+                            .padding(12)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                
+                Spacer()
+                
+                // Bottom controls
+                HStack {
+                    Spacer()
+                    
+                    // Recenter button
+                    Button {
+                        recenterMap()
+                    } label: {
+                        Image(systemName: "location.fill")
+                            .font(.headline)
+                            .foregroundStyle(.blue)
+                            .padding(12)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 24)
+            }
+        }
+        .onAppear {
+            setupCamera()
+        }
+    }
+    
+    private func setupCamera() {
+        guard let bounds = drive.routeBounds else { return }
+        cameraPosition = .region(MKCoordinateRegion(center: bounds.center, span: bounds.span))
+    }
+    
+    private func recenterMap() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            setupCamera()
+        }
     }
 }
 

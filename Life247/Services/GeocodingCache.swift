@@ -7,9 +7,11 @@
 
 import Foundation
 import CoreLocation
+import OSLog
 
 /// Caches reverse geocoding results to avoid repeated lookups.
 /// Keys are rounded coordinates (4 decimal places ≈ 11m precision).
+/// Cache is persisted to disk to survive app restarts.
 actor GeocodingCache {
     static let shared = GeocodingCache()
     
@@ -17,8 +19,18 @@ actor GeocodingCache {
     private var insertionOrder: [String] = []  // Track key insertion order for LRU eviction
     private let maxEntries = 500
     private let geocoder = CLGeocoder()
+    private let logger = Logger(subsystem: "com.life247", category: "GeocodingCache")
     
-    private init() {}
+    /// File URL for persisted cache
+    private var cacheFileURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let cacheDir = appSupport.appendingPathComponent("Life247", isDirectory: true)
+        return cacheDir.appendingPathComponent("geocoding_cache.json")
+    }
+    
+    private init() {
+        loadFromDisk()
+    }
     
     /// Get cached address or perform reverse geocoding.
     func address(for coordinate: CLLocationCoordinate2D) async -> String? {
@@ -43,7 +55,7 @@ actor GeocodingCache {
                 return address
             }
         } catch {
-            // Geocoding failed - return nil
+            logger.debug("Geocoding failed for \(key): \(error.localizedDescription)")
         }
         
         return nil
@@ -61,6 +73,9 @@ actor GeocodingCache {
         
         cache[key] = value
         insertionOrder.append(key)
+        
+        // Persist to disk after each update
+        saveToDisk()
     }
     
     /// Round coordinate to 4 decimal places for cache key.
@@ -98,5 +113,58 @@ actor GeocodingCache {
     func clearCache() {
         cache.removeAll()
         insertionOrder.removeAll()
+        saveToDisk()
+    }
+    
+    // MARK: - Disk Persistence
+    
+    /// Serializable structure for disk storage
+    private struct CacheData: Codable {
+        let cache: [String: String]
+        let insertionOrder: [String]
+    }
+    
+    /// Load cache from disk
+    private func loadFromDisk() {
+        let fileURL = cacheFileURL
+        
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            logger.info("No cache file found - starting fresh")
+            return
+        }
+        
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let cacheData = try JSONDecoder().decode(CacheData.self, from: data)
+            cache = cacheData.cache
+            insertionOrder = cacheData.insertionOrder
+            logger.info("Loaded \(self.cache.count) cached addresses from disk")
+        } catch {
+            logger.error("Failed to load cache from disk: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Save cache to disk
+    private func saveToDisk() {
+        let fileURL = cacheFileURL
+        
+        // Ensure directory exists
+        let directory = fileURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            logger.error("Failed to create cache directory: \(error.localizedDescription)")
+            return
+        }
+        
+        // Save cache data
+        let cacheData = CacheData(cache: cache, insertionOrder: insertionOrder)
+        do {
+            let data = try JSONEncoder().encode(cacheData)
+            try data.write(to: fileURL, options: .atomic)
+            logger.debug("Saved \(self.cache.count) cached addresses to disk")
+        } catch {
+            logger.error("Failed to save cache to disk: \(error.localizedDescription)")
+        }
     }
 }

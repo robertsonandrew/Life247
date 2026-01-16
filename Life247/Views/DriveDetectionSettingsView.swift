@@ -8,82 +8,91 @@
 import SwiftUI
 
 /// View for adjusting drive detection parameters
+/// Uses segmented pickers with preset values for a more compact, responsive UI
 struct DriveDetectionSettingsView: View {
     @State private var settings = DriveDetectionSettings()
     @State private var showResetConfirmation = false
     
+    // Preset options for each setting
+    private let stoppedDetectionPresets: [Double] = [15, 30, 60, 90]
+    private let autoEndPresets: [Int] = [3, 5, 10, 15]
+    private let confirmationPresets: [Double] = [5, 10, 15, 20]
+    
     var body: some View {
         List {
-            // Stopped Detection Duration
+            // Stopped Detection
             Section {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Duration")
+                        Image(systemName: "pause.circle.fill")
+                            .foregroundStyle(.orange)
+                        Text("Stop Detection")
+                            .fontWeight(.medium)
                         Spacer()
                         Text("\(Int(settings.stoppedDetectionDuration))s")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                     
-                    Slider(
-                        value: $settings.stoppedDetectionDuration,
-                        in: DriveDetectionSettings.stoppedDetectionRange,
-                        step: 5
-                    )
+                    Picker("", selection: $settings.stoppedDetectionDuration) {
+                        ForEach(stoppedDetectionPresets, id: \.self) { value in
+                            Text("\(Int(value))s").tag(value)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
-            } header: {
-                Text("Stopped Detection")
             } footer: {
-                Text("How long at low speed before entering \"stopped\" state. Lower = faster detection, higher = ignores brief stops.")
+                Text("Time at low speed before entering stopped state")
             }
             
-            // Stopped Timeout
+            // Auto-End Drive
             Section {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Timeout")
+                        Image(systemName: "stop.circle.fill")
+                            .foregroundStyle(.red)
+                        Text("Auto-End")
+                            .fontWeight(.medium)
                         Spacer()
                         Text("\(settings.stoppedTimeoutMinutes) min")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                     
-                    Slider(
-                        value: Binding(
-                            get: { Double(settings.stoppedTimeoutMinutes) },
-                            set: { settings.stoppedTimeoutMinutes = Int($0) }
-                        ),
-                        in: Double(DriveDetectionSettings.stoppedTimeoutRange.lowerBound)...Double(DriveDetectionSettings.stoppedTimeoutRange.upperBound),
-                        step: 1
-                    )
+                    Picker("", selection: $settings.stoppedTimeoutMinutes) {
+                        ForEach(autoEndPresets, id: \.self) { value in
+                            Text("\(value)m").tag(value)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
-            } header: {
-                Text("Auto-End Drive")
             } footer: {
-                Text("How long stopped before automatically ending a drive. Increase if you make frequent quick stops.")
+                Text("Time at rest before a drive ends automatically")
             }
             
-            // Driving Confirmation Duration
+            // Drive Confirmation
             Section {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Duration")
+                        Image(systemName: "play.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("Start Detection")
+                            .fontWeight(.medium)
                         Spacer()
                         Text("\(Int(settings.drivingConfirmationDuration))s")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                     
-                    Slider(
-                        value: $settings.drivingConfirmationDuration,
-                        in: DriveDetectionSettings.drivingConfirmationRange,
-                        step: 5
-                    )
+                    Picker("", selection: $settings.drivingConfirmationDuration) {
+                        ForEach(confirmationPresets, id: \.self) { value in
+                            Text("\(Int(value))s").tag(value)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
-            } header: {
-                Text("Drive Confirmation")
             } footer: {
-                Text("How long you must maintain driving speed before a drive starts recording. Lower = quicker detection, higher = fewer false starts.")
+                Text("Time at driving speed before recording starts")
             }
             
             // Reset Section
@@ -93,6 +102,7 @@ struct DriveDetectionSettingsView: View {
                 }
             }
         }
+        .contentMargins(.bottom, 100, for: .scrollContent)
         .navigationTitle("Drive Detection")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(

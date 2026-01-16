@@ -88,6 +88,13 @@ final class DriveStateMachine {
     private var sustainedHighSpeedStart: Date?
     private var sustainedLowSpeedStart: Date?
     
+    // Stopped state tracking (for Issue #1 fix)
+    private var stoppedSince: Date?
+    
+    // Periodic save tracking (for Issue #2 fix)
+    private var pointsSinceLastSave: Int = 0
+    private let saveInterval: Int = 50  // Save every 50 points
+    
     // MARK: - Initialization
     
     init() {
@@ -128,17 +135,17 @@ final class DriveStateMachine {
             // Start the stopped timer which will end the drive after timeout
             // (Timer was already started by transition to .stopped)
             
-            // If we're already in .stopped, manually check if we should end
-            // by checking how long since last movement
-            if state == .stopped, let drive = activeDrive {
-                let driveAge = Date().timeIntervalSince(drive.startTime)
+            // If we're already in .stopped, check if we've been stopped long enough to end
+            if state == .stopped {
                 let stoppedTimeout = stoppedTimeoutMinutes * 60
+                let stoppedDuration = stoppedSince.map { Date().timeIntervalSince($0) } ?? 0
                 
-                // If drive has been going for longer than stopped timeout,
-                // and we're currently stopped, end it now
-                if driveAge > stoppedTimeout {
-                    logger.info("[RECONCILE] Drive age (\(Int(driveAge))s) exceeds stopped timeout - ending drive")
+                // End drive if we've been in stopped state longer than timeout
+                if stoppedDuration > stoppedTimeout {
+                    logger.info("[RECONCILE] Stopped duration (\(Int(stoppedDuration))s) exceeds timeout - ending drive")
                     transition(to: .ended)
+                } else {
+                    logger.info("[RECONCILE] Stopped for \(Int(stoppedDuration))s, timeout is \(Int(stoppedTimeout))s - continuing")
                 }
             }
         } else {
@@ -335,7 +342,9 @@ final class DriveStateMachine {
             
         case .driving:
             // Record location point
-            activeDrive?.addPoint(location)
+            if activeDrive?.addPoint(location) == true {
+                periodicallySaveIfNeeded()
+            }
             
             // Check for low speed (potential stop)
             if speedMPH < stoppedSpeedThreshold {
@@ -350,7 +359,9 @@ final class DriveStateMachine {
             
         case .stopped:
             // Record location point (GPS still running)
-            activeDrive?.addPoint(location)
+            if activeDrive?.addPoint(location) == true {
+                periodicallySaveIfNeeded()
+            }
             
             // Check for resume
             if speedMPH >= resumeSpeedThreshold {
@@ -473,6 +484,7 @@ final class DriveStateMachine {
         case .stopped:
             stoppedTimer?.cancel()
             stoppedTimer = nil
+            stoppedSince = nil
             
         case .driving:
             sustainedLowSpeedStart = nil
@@ -503,6 +515,8 @@ final class DriveStateMachine {
             startSafetyTimer()
             
         case .stopped:
+            // Track when stopped started (for timeout calculation)
+            stoppedSince = Date()
             // Start stopped timeout timer
             startStoppedTimer()
             
@@ -564,6 +578,7 @@ final class DriveStateMachine {
         
         modelContext.insert(drive)
         activeDrive = drive
+        pointsSinceLastSave = 0  // Reset save counter for new drive
         
         logger.info("Created new drive: \(drive.shortId)")
         logger.info("[SETTINGS] stoppedTimeout=\(Int(self.stoppedTimeoutMinutes))min stoppedDetection=\(Int(self.stoppedDetectionDuration))s drivingConfirm=\(Int(self.drivingConfirmationDuration))s")
@@ -585,6 +600,22 @@ final class DriveStateMachine {
             logger.info("Finalized drive: \(drive.shortId), distance: \(drive.formattedDistance), duration: \(drive.formattedDuration)")
         } catch {
             logger.error("Failed to save drive: \(error.localizedDescription)")
+        }
+        pointsSinceLastSave = 0  // Reset counter after final save
+    }
+    
+    /// Periodically save drive data to prevent loss on crash
+    private func periodicallySaveIfNeeded() {
+        pointsSinceLastSave += 1
+        
+        guard pointsSinceLastSave >= saveInterval else { return }
+        
+        do {
+            try modelContext?.save()
+            logger.debug("Periodic save completed (\(self.pointsSinceLastSave) points)")
+            pointsSinceLastSave = 0
+        } catch {
+            logger.error("Periodic save failed: \(error.localizedDescription)")
         }
     }
     
