@@ -1,0 +1,60 @@
+# =================
+# Xcode
+# =================
+
+# Build generated
+build/
+DerivedData/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# User-specific data (IMPORTANT: contains your personal Xcode settings)
+xcuserdata/
+*.xcuserstate
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+
+# CocoaPods (uncomment if you use CocoaPods)
+# Pods/
+
+# Carthage
+Carthage/Build/
+
+# =================
+# macOS
+# =================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Trashes
+.Spotlight-V100
+
+# =================
+# IDE / Editor
+# =================
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# =================
+# Sensitive Files (add any secrets here)
+# =================
+# Secrets.swift
+# *.p12
+# *.mobileprovision

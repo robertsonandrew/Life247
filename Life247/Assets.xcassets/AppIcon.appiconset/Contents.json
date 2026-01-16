@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "xyzmaps_app_icon_1024_1767894332320.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -12,6 +13,7 @@
           "value" : "dark"
         }
       ],
+      "filename" : "xyzmaps_app_icon_1024_1767894332320 2.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -23,6 +25,7 @@
           "value" : "tinted"
         }
       ],
+      "filename" : "xyzmaps_app_icon_1024_1767894332320 1.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"

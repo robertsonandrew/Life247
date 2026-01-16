@@ -10,9 +10,22 @@
 		03E2C54F2F180A9300F14ACC /* Life247.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Life247.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		03E2C5C62F18116B00F14ACC /* Exceptions for "Life247" folder in "Life247" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 03E2C54E2F180A9300F14ACC /* Life247 */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		03E2C5512F180A9300F14ACC /* Life247 */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				03E2C5C62F18116B00F14ACC /* Exceptions for "Life247" folder in "Life247" target */,
+			);
 			path = Life247;
 			sourceTree = "<group>";
 		};
@@ -256,6 +269,10 @@
 				DEVELOPMENT_TEAM = 5LG8X46PQ2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Life247/Info.plist;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Life247 needs location access to automatically detect and record your drives, even when the app is in the background.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Life247 needs location access to show your current position and track drives.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Life247 uses motion data to help detect when you are driving.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -288,6 +305,10 @@
 				DEVELOPMENT_TEAM = 5LG8X46PQ2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Life247/Info.plist;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Life247 needs location access to automatically detect and record your drives, even when the app is in the background.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Life247 needs location access to show your current position and track drives.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Life247 uses motion data to help detect when you are driving.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
