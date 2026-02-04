@@ -24,8 +24,16 @@ final class NotificationService: ObservableObject {
     private let center = UNUserNotificationCenter.current()
     
     private init() {
-        self.notifyOnStart = UserDefaults.standard.bool(forKey: "notifyOnDriveStart")
-        self.notifyOnEnd = UserDefaults.standard.bool(forKey: "notifyOnDriveEnd")
+        // Default both notifications to ON if not explicitly set
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "notifyOnDriveStart") == nil {
+            defaults.set(true, forKey: "notifyOnDriveStart")
+        }
+        if defaults.object(forKey: "notifyOnDriveEnd") == nil {
+            defaults.set(true, forKey: "notifyOnDriveEnd")
+        }
+        self.notifyOnStart = defaults.bool(forKey: "notifyOnDriveStart")
+        self.notifyOnEnd = defaults.bool(forKey: "notifyOnDriveEnd")
     }
     
     // MARK: - Permission
@@ -36,6 +44,8 @@ final class NotificationService: ObservableObject {
         
         switch settings.authorizationStatus {
         case .authorized, .provisional:
+            return true
+        case .ephemeral:
             return true
         case .denied:
             return false

@@ -7,11 +7,13 @@
 
 import Foundation
 import CoreMotion
+import CoreLocation
 import Combine
 import OSLog
 
 /// Passive motion activity provider.
 /// Responsibilities: Start/stop CMMotionActivity updates, convert to DriveEvents.
+/// Also provides device motion (accelerometer) for G-force detection during drives.
 /// Forbidden: Driving inference, timers, persistence.
 final class MotionManager: ObservableObject {
     
@@ -20,19 +22,29 @@ final class MotionManager: ObservableObject {
     @Published private(set) var isAuthorized: Bool = false
     @Published private(set) var isMonitoring: Bool = false
     @Published private(set) var currentActivity: CMMotionActivity?
+    @Published private(set) var isAccelerometerActive: Bool = false
     
     // MARK: - Private Properties
     
     private let motionActivityManager = CMMotionActivityManager()
+    private let motionManager = CMMotionManager()  // For accelerometer/gyro
     private let logger = Logger(subsystem: "com.life247", category: "MotionManager")
     private weak var eventSink: LocationEventSink?
     private let operationQueue = OperationQueue()
+    private let deviceMotionQueue = OperationQueue()
+    
+    /// Acceleration detector for G-force events
+    let accelerationDetector = AccelerationDetector()
     
     // MARK: - Initialization
     
     init() {
         operationQueue.name = "com.life247.motion"
         operationQueue.maxConcurrentOperationCount = 1
+        
+        deviceMotionQueue.name = "com.life247.deviceMotion"
+        deviceMotionQueue.maxConcurrentOperationCount = 1
+        
         checkAuthorization()
     }
     
@@ -116,19 +128,37 @@ final class MotionManager: ObservableObject {
         }
         
         if activity.automotive {
-            // Deduplicate: If we were already automotive with same confidence, skip
-            if case .automotive(let lastConf) = lastEmittedCategory, lastConf == activity.confidence {
-                return
+            // Always emit if confidence upgraded (medium → high) to enable fast-track
+            let shouldEmit: Bool
+            if case .automotive(let lastConf) = lastEmittedCategory {
+                // Emit if confidence increased
+                shouldEmit = activity.confidence.rawValue > lastConf.rawValue
+            } else {
+                // First automotive detection - always emit
+                shouldEmit = true
             }
+            
+            guard shouldEmit else { return }
             
             logger.debug("Automotive activity detected (confidence: \(activity.confidence.rawValue))")
             eventSink?.handle(.motionAutomotive(confidence: activity.confidence))
             lastEmittedCategory = .automotive(confidence: activity.confidence)
             
-        } else if activity.stationary || activity.walking || activity.running || activity.cycling {
-            // Deduplicate: If we were already non-automotive, skip
+        } else if activity.walking || activity.running {
+            // Walking or running - strong signal user is on foot (not in vehicle)
+            // Emit dedicated event for state machine to handle specially when stopped
             if case .nonAutomotive = lastEmittedCategory {
-                return
+                return  // Deduplicate
+            }
+            
+            logger.debug("On-foot activity detected (walking: \(activity.walking), running: \(activity.running))")
+            eventSink?.handle(.motionOnFoot)
+            lastEmittedCategory = .nonAutomotive
+            
+        } else if activity.stationary || activity.cycling {
+            // Other non-automotive activities
+            if case .nonAutomotive = lastEmittedCategory {
+                return  // Deduplicate
             }
             
             logger.debug("Non-automotive activity detected")
@@ -136,6 +166,66 @@ final class MotionManager: ObservableObject {
             lastEmittedCategory = .nonAutomotive
         }
         // Unknown activity is ignored
+    }
+    
+    // MARK: - Device Motion (Accelerometer) for G-Force Detection
+    
+    /// Start device motion updates for G-force detection.
+    /// Call this when a drive starts. Uses sensor fusion for accurate orientation.
+    func startAccelerometer() {
+        guard motionManager.isDeviceMotionAvailable else {
+            logger.warning("Device motion not available")
+            return
+        }
+        
+        guard !isAccelerometerActive else {
+            logger.debug("Accelerometer already active")
+            return
+        }
+        
+        // Set sample rate (25 Hz = 0.04 second interval)
+        let sampleRate = accelerationDetector.config.sampleRateHz
+        motionManager.deviceMotionUpdateInterval = 1.0 / sampleRate
+        
+        logger.info("Starting device motion at \(sampleRate) Hz for G-force detection")
+        
+        // Use XMagneticNorthZVertical for consistent world-frame orientation
+        // This gives us: X=North, Y=West, Z=Up
+        motionManager.startDeviceMotionUpdates(
+            using: .xMagneticNorthZVertical,
+            to: deviceMotionQueue
+        ) { [weak self] motion, error in
+            guard let self, let motion else {
+                if let error {
+                    self?.logger.error("Device motion error: \(error.localizedDescription)")
+                }
+                return
+            }
+            
+            // Process motion on the dedicated queue
+            self.accelerationDetector.processMotion(motion)
+        }
+        
+        accelerationDetector.start()
+        isAccelerometerActive = true
+        logger.info("[GFORCE] Accelerometer STARTED - sampling at \(sampleRate) Hz")
+    }
+    
+    /// Stop device motion updates.
+    /// Call this when a drive ends to save battery.
+    func stopAccelerometer() {
+        guard isAccelerometerActive else { return }
+        
+        logger.info("[GFORCE] Accelerometer STOPPED")
+        
+        motionManager.stopDeviceMotionUpdates()
+        accelerationDetector.stop()
+        isAccelerometerActive = false
+    }
+    
+    /// Update accelerometer with GPS location for coordinate transformation
+    func updateAccelerometerGPS(_ location: CLLocation) {
+        accelerationDetector.updateGPS(location)
     }
     
     // MARK: - Debug Info

@@ -12,30 +12,66 @@ import MapKit
 /// View for managing user-defined Places.
 struct PlacesView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var syncService: DriveSyncService
     @Query(sort: \Place.name) private var places: [Place]
     
+    // Fetch drives for timeline analysis (last 60 days)
+    @Query(filter: #Predicate<Drive> { $0.endTime != nil },
+           sort: \Drive.startTime,
+           order: .reverse)
+    private var drives: [Drive]
+    
     @State private var showingAddPlace = false
+    @State private var suggestedPlaces: [FrequentStopCandidate] = []
+    @State private var selectedSuggestion: FrequentStopCandidate?
+    @State private var isLoadingSuggestions = true
     
     var body: some View {
         List {
-            if places.isEmpty {
-                ContentUnavailableView(
-                    "No Places",
-                    systemImage: "mappin.slash",
-                    description: Text("Add places like Home or Work to enhance your timeline")
-                )
-            } else {
-                ForEach(places) { place in
-                    NavigationLink {
-                        EditPlaceView(place: place)
-                    } label: {
-                        PlaceRowView(place: place)
+            // Suggested Places section (only if we have suggestions)
+            if !suggestedPlaces.isEmpty {
+                Section {
+                    ForEach(suggestedPlaces) { candidate in
+                        Button {
+                            selectedSuggestion = candidate
+                        } label: {
+                            SuggestedPlaceRowView(candidate: candidate)
+                        }
+                        .buttonStyle(.plain)
                     }
+                } header: {
+                    Label("Suggested Places", systemImage: "lightbulb.fill")
+                        .foregroundStyle(.yellow)
+                } footer: {
+                    Text("Locations you've visited on 3+ different days")
                 }
-                .onDelete(perform: deletePlaces)
+            }
+            
+            // Saved Places section
+            Section {
+                if places.isEmpty {
+                    ContentUnavailableView(
+                        "No Saved Places",
+                        systemImage: "mappin.slash",
+                        description: Text("Add places like Home or Work to enhance your timeline")
+                    )
+                } else {
+                    ForEach(places) { place in
+                        NavigationLink {
+                            EditPlaceView(place: place)
+                        } label: {
+                            PlaceRowView(place: place)
+                        }
+                    }
+                    .onDelete(perform: deletePlaces)
+                }
+            } header: {
+                if !places.isEmpty {
+                    Text("Saved Places")
+                }
             }
         }
-        .contentMargins(.bottom, 100, for: .scrollContent)
+        .bottomBarPadding()
         .navigationTitle("Places")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -51,14 +87,60 @@ struct PlacesView: View {
                 AddPlaceView()
             }
         }
+        .sheet(item: $selectedSuggestion) { candidate in
+            NavigationStack {
+                SaveAsPlaceView(coordinate: candidate.coordinate)
+            }
+        }
+        .task {
+            await loadSuggestedPlaces()
+        }
+        .onChange(of: places.count) { _, _ in
+            // Refresh suggestions when places change (in case a suggestion was saved)
+            Task { await loadSuggestedPlaces() }
+        }
+    }
+    
+    // MARK: - Data Loading
+    
+    private func loadSuggestedPlaces() async {
+        isLoadingSuggestions = true
+        
+        // Build timeline from drives
+        let timeline = await TimelineBuilder.buildTimeline(
+            drives: Array(drives.prefix(200)), // Limit for performance
+            places: places
+        )
+        
+        // Extract stops
+        let stops = timeline.compactMap { item -> InferredStop? in
+            if case .stop(let stop) = item { return stop }
+            return nil
+        }
+        
+        // Analyze for frequent stops
+        let result = FrequentStopAnalyzer.analyze(stops: stops, places: places)
+        
+        await MainActor.run {
+            self.suggestedPlaces = result.candidates
+            self.isLoadingSuggestions = false
+        }
     }
     
     private func deletePlaces(at offsets: IndexSet) {
         for index in offsets {
-            modelContext.delete(places[index])
+            let place = places[index]
+            let placeId = place.placeId
+            modelContext.delete(place)
+            
+            // Sync deletion to server
+            Task {
+                await syncService.deletePlace(placeId)
+            }
         }
     }
 }
+
 
 // MARK: - Place Row
 
@@ -88,91 +170,62 @@ struct PlaceRowView: View {
 
 struct AddPlaceView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var syncService: DriveSyncService
     @Environment(\.dismiss) private var dismiss
     
     @State private var name = ""
     @State private var selectedIcon = "mappin.circle.fill"
     @State private var radius: Double = 100
-    @State private var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 36.0, longitude: -95.9),
-        span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
-    )
-    @State private var markerPosition: CLLocationCoordinate2D?
+    @State private var coordinate: CLLocationCoordinate2D
     
-    private let radiusPresets: [Double] = [50, 100, 250]
+    init() {
+        // Default to current location if available, else Tulsa
+        let manager = CLLocationManager()
+        let defaultCoord = manager.location?.coordinate ?? CLLocationCoordinate2D(latitude: 36.0, longitude: -95.9)
+        self._coordinate = State(initialValue: defaultCoord)
+    }
     
     var body: some View {
-        Form {
-            Section("Name") {
-                TextField("Place name", text: $name)
-            }
-            
-            Section("Icon") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(Place.commonIcons, id: \.icon) { item in
-                            Button {
-                                selectedIcon = item.icon
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: item.icon)
-                                        .font(.title2)
-                                        .foregroundStyle(selectedIcon == item.icon ? .blue : .secondary)
-                                    Text(item.name)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(width: 60)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                }
-            }
-            
-            Section("Radius") {
-                Picker("Radius", selection: $radius) {
-                    ForEach(radiusPresets, id: \.self) { preset in
-                        Text("\(Int(preset))m").tag(preset)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            
-            Section("Location") {
-                if markerPosition != nil {
-                    Map(coordinateRegion: $region, annotationItems: markerAnnotations) { item in
-                        MapAnnotation(coordinate: item.coordinate) {
-                            Circle()
-                                .fill(.blue.opacity(0.3))
-                                .frame(width: radiusInPoints, height: radiusInPoints)
-                                .overlay(
-                                    Circle()
-                                        .stroke(.blue, lineWidth: 2)
-                                )
-                                .overlay(
-                                    Image(systemName: selectedIcon)
-                                        .foregroundStyle(.blue)
-                                )
-                        }
-                    }
-                    .frame(height: 200)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    Text("Tap below to use your current location")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(height: 100)
-                        .frame(maxWidth: .infinity)
+        VStack(spacing: 0) {
+            Form {
+                Section("Name") {
+                    TextField("Place name", text: $name)
                 }
                 
-                Button {
-                    useCurrentLocation()
-                } label: {
-                    Label("Use Current Location", systemImage: "location.fill")
+                Section("Icon") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(Place.commonIcons, id: \.icon) { item in
+                                Button {
+                                    selectedIcon = item.icon
+                                } label: {
+                                    VStack(spacing: 4) {
+                                        Image(systemName: item.icon)
+                                            .font(.title2)
+                                            .foregroundStyle(selectedIcon == item.icon ? .blue : .secondary)
+                                        Text(item.name)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(width: 60)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
                 }
+                
             }
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            .frame(height: 240)
+            
+            InteractiveGeofenceMap(
+                coordinate: $coordinate,
+                radiusMeters: $radius,
+                icon: selectedIcon
+            )
         }
         .navigationTitle("Add Place")
         .navigationBarTitleDisplayMode(.inline)
@@ -184,104 +237,92 @@ struct AddPlaceView: View {
                 Button("Save") {
                     savePlace()
                 }
-                .disabled(name.isEmpty || markerPosition == nil)
+                .disabled(name.isEmpty)
             }
         }
     }
     
-    private var markerAnnotations: [MarkerAnnotation] {
-        guard let position = markerPosition else { return [] }
-        return [MarkerAnnotation(coordinate: position)]
-    }
-    
-    private var radiusInPoints: CGFloat {
-        // Approximate conversion (varies with zoom)
-        CGFloat(radius / 5)
-    }
-    
-    private func useCurrentLocation() {
-        let manager = CLLocationManager()
-        if let location = manager.location {
-            markerPosition = location.coordinate
-            region = MKCoordinateRegion(
-                center: location.coordinate,
-                span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
-            )
-        }
-    }
-    
     private func savePlace() {
-        guard let position = markerPosition else { return }
-        
         let place = Place(
             name: name,
-            coordinate: position,
+            coordinate: coordinate,
             radiusMeters: radius,
             icon: selectedIcon
         )
         
         modelContext.insert(place)
+        
+        // Sync to server
+        Task {
+            await syncService.syncPlace(place)
+        }
+        
         dismiss()
     }
-}
-
-struct MarkerAnnotation: Identifiable {
-    let id = UUID()
-    let coordinate: CLLocationCoordinate2D
 }
 
 // MARK: - Edit Place View
 
 struct EditPlaceView: View {
     @Bindable var place: Place
+    @EnvironmentObject private var syncService: DriveSyncService
     @Environment(\.dismiss) private var dismiss
     
+    /// Binding wrapper for the computed coordinate property
+    private var coordinateBinding: Binding<CLLocationCoordinate2D> {
+        Binding(
+            get: { place.coordinate },
+            set: { newCoord in
+                place.latitude = newCoord.latitude
+                place.longitude = newCoord.longitude
+            }
+        )
+    }
+    
     var body: some View {
-        Form {
-            Section("Name") {
-                TextField("Place name", text: $place.name)
-            }
-            
-            Section("Icon") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(Place.commonIcons, id: \.icon) { item in
-                            Button {
-                                place.icon = item.icon
-                            } label: {
-                                Image(systemName: item.icon)
-                                    .font(.title2)
-                                    .foregroundStyle(place.icon == item.icon ? .blue : .secondary)
+        VStack(spacing: 0) {
+            Form {
+                Section("Name") {
+                    TextField("Place name", text: $place.name)
+                }
+                
+                Section("Icon") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(Place.commonIcons, id: \.icon) { item in
+                                Button {
+                                    place.icon = item.icon
+                                } label: {
+                                    Image(systemName: item.icon)
+                                        .font(.title2)
+                                        .foregroundStyle(place.icon == item.icon ? .blue : .secondary)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
-                    }
-                    .padding(.vertical, 8)
-                }
-            }
-            
-            Section("Radius") {
-                Picker("Radius", selection: $place.radiusMeters) {
-                    Text("50m").tag(50.0)
-                    Text("100m").tag(100.0)
-                    Text("250m").tag(250.0)
-                }
-                .pickerStyle(.segmented)
-            }
-            
-            Section("Location") {
-                Map {
-                    Annotation(place.name, coordinate: place.coordinate) {
-                        Image(systemName: place.icon)
-                            .foregroundStyle(.blue)
+                        .padding(.vertical, 8)
                     }
                 }
-                .frame(height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                
             }
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            .frame(height: 200)
+            
+            InteractiveGeofenceMap(
+                coordinate: coordinateBinding,
+                radiusMeters: $place.radiusMeters,
+                icon: place.icon
+            )
         }
         .navigationTitle("Edit Place")
         .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            // Sync changes when leaving the edit view
+            Task {
+                await syncService.syncPlace(place)
+            }
+        }
     }
 }
 

@@ -18,6 +18,9 @@ enum TimerKind: String, Equatable {
     /// Triggers ended transition after threshold
     case stoppedTimeout
     
+    /// Validates geofence arrival window (20-30s)
+    case pendingArrival
+    
     /// Safety fallback to end drives that exceed maximum duration
     case safetyEnd
 }

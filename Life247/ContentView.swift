@@ -8,16 +8,18 @@
 import SwiftUI
 import SwiftData
 
-/// Main content view with tab-based navigation via NavigationBar.
-/// ContentView is the ONLY owner of selectedTab state.
+/// Main content view with unified bottom bar.
+/// BottomBar combines DriveSheet + TabBar as one component.
 struct ContentView: View {
     @Bindable var stateMachine: DriveStateMachine
     @ObservedObject var locationManager: LocationManager
     @ObservedObject var motionManager: MotionManager
     
-    // Single source of truth for navigation
+    // Environment
+    @Environment(\.scenePhase) var scenePhase
+    
+    // Tab selection
     @State private var selectedTab: AppTab = .map
-    @State private var isNavBarExpanded: Bool = true
     
     var body: some View {
         Group {
@@ -33,45 +35,102 @@ struct ContentView: View {
         .onChange(of: stateMachine.state) { oldState, newState in
             handleStateChange(from: oldState, to: newState)
         }
+        .onChange(of: stateMachine.isPostDriveMonitoring) { wasMonitoring, isMonitoring in
+            // When post-drive monitoring ends (and we're still idle), disable high-accuracy
+            if wasMonitoring && !isMonitoring && stateMachine.state == .idle {
+                locationManager.disableHighAccuracy(reason: "driving")
+            }
+        }
+        .onChange(of: selectedTab) { oldTab, newTab in
+            // Only enable manual high-accuracy if app is active
+            if newTab == .map && scenePhase == .active {
+                locationManager.enableHighAccuracy(reason: "mapVisible")
+            } else {
+                locationManager.disableHighAccuracy(reason: "mapVisible")
+            }
+        }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if newPhase == .active {
+                // Determine if we need to restore map accuracy
+                if selectedTab == .map {
+                    locationManager.enableHighAccuracy(reason: "mapVisible")
+                }
+            } else if newPhase == .background || newPhase == .inactive {
+                // Disable manual map tracking when backgrounding
+                // (Driven high-accuracy is handled separately by StateMachine)
+                locationManager.disableHighAccuracy(reason: "mapVisible")
+            }
+        }
+        .onAppear {
+            if selectedTab == .map {
+                locationManager.enableHighAccuracy(reason: "mapVisible")
+            }
+        }
+    }
+    
+    // MARK: - Main Content
+    
+    /// Dynamic bottom bar height (updated via preference from BottomBar)
+    @State private var dynamicBottomBarHeight: CGFloat = 112  // Default: tab (56) + peek (56)
+    
+    private var showDriveSheet: Bool {
+        // Drive sheet shows on map tab during active driving states
+        true // Always present on map tab, just with different content
     }
     
     private var mainContent: some View {
-        // Active tab view (rendered based on selectedTab)
-        Group {
-            switch selectedTab {
-            case .map:
+        // Use ZStack to keep DashboardView alive across tab switches
+        // This prevents expensive map recreation that causes freezing
+        ZStack {
+            // Main Content Layer
+            ZStack {
+                // Map is always rendered (just hidden when not selected)
                 DashboardView(
                     stateMachine: stateMachine,
                     locationManager: locationManager
                 )
+                .opacity(selectedTab == .map ? 1 : 0)
+                .zIndex(selectedTab == .map ? 1 : 0)
                 
-            case .history:
-                NavigationStack {
-                    HistoryView()
+                // History and Settings are conditionally rendered
+                if selectedTab == .history {
+                    NavigationStack {
+                        HistoryView()
+                    }
+                    .zIndex(2)
                 }
                 
-            case .settings:
-                SettingsView()
+                if selectedTab == .settings {
+                    SettingsView()
+                        .zIndex(2)
+                }
             }
+            .environment(\.bottomBarHeight, dynamicBottomBarHeight)
+            .animation(nil, value: selectedTab)
+            
+            // Bottom Bar Layer (Stacked on top)
+            VStack {
+                Spacer()
+                BottomBar(
+                    selectedTab: $selectedTab,
+                    driveState: stateMachine.state,
+                    speed: currentSpeedMPH,
+                    distance: currentDistanceMiles,
+                    duration: currentDuration,
+                    avgSpeed: avgSpeedMPH,
+                    maxSpeed: maxSpeedMPH,
+                    pointCount: pointCount,
+                    onEndDrive: stateMachine.state == .driving || stateMachine.state == .stopped
+                        ? { stateMachine.recoverFromStuckDrive() }
+                        : nil,
+                    showDriveSheet: selectedTab == .map,
+                    visibleHeight: $dynamicBottomBarHeight
+                )
+            }
+            .animation(nil, value: dynamicBottomBarHeight)
         }
-        // No animation on tab switch
-        .animation(nil, value: selectedTab)
-        // Navigation bar as safe area inset so MapKit can position attribution correctly
-        .safeAreaInset(edge: .bottom) {
-            NavigationBar(
-                selectedTab: $selectedTab,
-                isExpanded: $isNavBarExpanded,
-                driveState: stateMachine.state,
-                speed: currentSpeedMPH,
-                distance: currentDistanceMiles,
-                duration: currentDuration,
-                avgSpeed: avgSpeedMPH,
-                maxSpeed: maxSpeedMPH,
-                pointCount: pointCount,
-                onEndDrive: stateMachine.state == .driving || stateMachine.state == .stopped
-                    ? { stateMachine.recoverFromStuckDrive() }
-                    : nil
-            )
+        .onPreferenceChange(BottomBarHeightPreferenceKey.self) { height in
+            dynamicBottomBarHeight = height
         }
         .ignoresSafeArea(.keyboard)
     }
@@ -107,11 +166,24 @@ struct ContentView: View {
     
     private func handleStateChange(from oldState: DriveState, to newState: DriveState) {
         switch newState {
-        case .maybeDriving, .driving, .stopped:
-            locationManager.enableHighAccuracyMode()
+        case .maybeDriving, .driving, .stopped, .pendingArrival:
+            locationManager.enableHighAccuracy(reason: "driving")
             
-        case .idle, .ended:
-            locationManager.disableHighAccuracyMode()
+        case .ended:
+            // Don't disable high-accuracy immediately - let post-drive monitoring handle it
+            // The stateMachine.isPostDriveMonitoring flag will be true
+            break
+            
+        case .idle:
+            // coldStart should always be released when going to idle
+            // (it's only for the initial recovery, not post-drive monitoring)
+            locationManager.disableHighAccuracy(reason: "coldStart")
+            
+            // Only disable driving high-accuracy if we're not in post-drive monitoring
+            // (post-drive monitoring keeps tracking briefly to catch false arrivals)
+            if !stateMachine.isPostDriveMonitoring {
+                locationManager.disableHighAccuracy(reason: "driving")
+            }
         }
     }
 }

@@ -28,10 +28,11 @@ func mapCamera(
     for mode: MapTrackingMode,
     location: CLLocation,
     speed: CLLocationSpeed,
-    zoomLevel: MapZoomLevel = .neighborhood
+    zoomLevel: MapZoomLevel = .area,
+    headingOverride: Double? = nil
 ) -> MapCamera {
     let speedMPH = max(0, speed * 2.23694)
-    let course = location.course >= 0 ? location.course : 0
+    let course = headingOverride ?? (location.course >= 0 ? location.course : 0)
     
     switch mode {
     case .free:

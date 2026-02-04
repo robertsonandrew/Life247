@@ -26,17 +26,23 @@ struct DriveDetectionSettings {
     /// Range: 5-30s, Default: 10s
     @AppStorage("drivingConfirmationDuration") var drivingConfirmationDuration: Double = 10.0
     
+    /// Maximum time in maybeDriving before giving up (seconds)
+    /// Range: 15-120s, Default: 30s
+    @AppStorage("verificationTimeout") var verificationTimeout: Double = 30.0
+    
     // MARK: - Defaults
     
     static let defaultStoppedDetectionDuration: Double = 30.0
     static let defaultStoppedTimeoutMinutes: Int = 5
     static let defaultDrivingConfirmationDuration: Double = 10.0
+    static let defaultVerificationTimeout: Double = 30.0
     
     // MARK: - Ranges
     
     static let stoppedDetectionRange: ClosedRange<Double> = 10...120
     static let stoppedTimeoutRange: ClosedRange<Int> = 1...15
     static let drivingConfirmationRange: ClosedRange<Double> = 5...30
+    static let verificationTimeoutRange: ClosedRange<Double> = 15...120
     
     // MARK: - Reset
     
@@ -46,5 +52,6 @@ struct DriveDetectionSettings {
         stoppedDetectionDuration = Self.defaultStoppedDetectionDuration
         stoppedTimeoutMinutes = Self.defaultStoppedTimeoutMinutes
         drivingConfirmationDuration = Self.defaultDrivingConfirmationDuration
+        verificationTimeout = Self.defaultVerificationTimeout
     }
 }

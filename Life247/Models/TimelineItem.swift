@@ -10,12 +10,12 @@ import CoreLocation
 
 /// A unified timeline entry - either a drive or an inferred stop.
 enum TimelineItem: Identifiable {
-    case drive(Drive)
+    case drive(Drive, trace: [(coordinate: CLLocationCoordinate2D, speedMPH: Double)], maxSpeedMPH: Double, destinationName: String?)
     case stop(InferredStop)
     
     var id: String {
         switch self {
-        case .drive(let drive):
+        case .drive(let drive, _, _, _):
             return "drive-\(drive.id.uuidString)"
         case .stop(let stop):
             return "stop-\(stop.id.uuidString)"
@@ -25,7 +25,7 @@ enum TimelineItem: Identifiable {
     /// Start time for sorting (avoids type checking in sort)
     var startTime: Date {
         switch self {
-        case .drive(let drive):
+        case .drive(let drive, _, _, _):
             return drive.startTime
         case .stop(let stop):
             return stop.startTime
@@ -35,11 +35,28 @@ enum TimelineItem: Identifiable {
     /// End time for timeline display
     var endTime: Date {
         switch self {
-        case .drive(let drive):
+        case .drive(let drive, _, _, _):
             return drive.endTime ?? drive.startTime
         case .stop(let stop):
             return stop.endTime
         }
+    }
+    
+    /// Whether this is a stop (for layout purposes)
+    var isStop: Bool {
+        if case .stop = self { return true }
+        return false
+    }
+    
+    /// Extract the drive if this is a drive item
+    var drive: Drive? {
+        if case .drive(let drive, _, _, _) = self { return drive }
+        return nil
+    }
+
+    var stopIcon: String? {
+        if case .stop(let stop) = self { return stop.displayIcon }
+        return nil
     }
 }
 

@@ -34,6 +34,7 @@ struct MiniRouteMap: View {
                     Image(uiImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
                         .transition(.opacity.animation(.easeIn(duration: 0.2)))
                 }
             }
@@ -44,8 +45,9 @@ struct MiniRouteMap: View {
                 await generateSnapshot(size: geo.size)
             }
             .onDisappear {
-                // Release image memory when scrolling off-screen
-                snapshotImage = nil
+                // Cancel in-flight snapshot work.
+                // Don't clear `snapshotImage` here: list cell reuse would cause
+                // expensive re-snapshotting when the user scrolls back.
                 renderer.cancel()
             }
         }
@@ -59,13 +61,23 @@ struct MiniRouteMap: View {
 
     @MainActor
     private func generateSnapshot(size: CGSize) async {
+        guard size.width > 1, size.height > 1 else { return }
+        guard drive.points.count > 1 else { return }
         guard snapshotImage == nil else { return }
+
+        // HACK: Request a taller image to push the Apple Maps logo/legal text off data
+        // We align the image to the .top of the view, causing the bottom (with logo) to be clipped.
+        let logoBleed: CGFloat = 40
+        let captureSize = CGSize(width: size.width, height: size.height + logoBleed)
+        
+        // Use a reasonable default scale since UIScreen.main is deprecated in iOS 26
+        let displayScale: CGFloat = 3.0
 
         isLoading = true
         snapshotImage = await renderer.render(
             drive: drive,
-            size: size,
-            scale: UIScreen.main.scale
+            size: captureSize,
+            scale: displayScale
         )
         isLoading = false
     }

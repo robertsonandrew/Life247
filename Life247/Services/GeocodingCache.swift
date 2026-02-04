@@ -7,6 +7,7 @@
 
 import Foundation
 import CoreLocation
+import MapKit
 import OSLog
 
 /// Caches reverse geocoding results to avoid repeated lookups.
@@ -18,47 +19,173 @@ actor GeocodingCache {
     private var cache: [String: String] = [:]
     private var insertionOrder: [String] = []  // Track key insertion order for LRU eviction
     private let maxEntries = 500
-    private let geocoder = CLGeocoder()
     private let logger = Logger(subsystem: "com.life247", category: "GeocodingCache")
+    private var hasLoadedFromDisk = false
+    
+    // MARK: - In-flight Request Deduplication
+    
+    /// Track pending requests to avoid duplicate geocoding calls
+    private var inFlightRequests: [String: Task<String?, Never>] = [:]
+    
+    // MARK: - Rate Limiting & Backoff
+    
+    /// Track when we were last rate-limited
+    private var rateLimitedUntil: Date?
+    
+    /// Current backoff duration (exponential)
+    private var currentBackoffSeconds: TimeInterval = 1.0
+    
+    /// Maximum backoff duration
+    private let maxBackoffSeconds: TimeInterval = 60.0
+    
+    // MARK: - Negative Result Caching
+    
+    /// Coordinates where no placemark was found (avoid re-querying)
+    private var notFoundCache: Set<String> = []
+    
+    /// Max negative cache entries before pruning
+    private let maxNotFoundEntries = 200
     
     /// File URL for persisted cache
-    private var cacheFileURL: URL {
+    private nonisolated var cacheFileURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let cacheDir = appSupport.appendingPathComponent("Life247", isDirectory: true)
         return cacheDir.appendingPathComponent("geocoding_cache.json")
     }
     
     private init() {
-        loadFromDisk()
+        // Disk loading is deferred to first access
+    }
+    
+    /// Ensure cache is loaded from disk (called lazily)
+    private func ensureLoaded() {
+        guard !hasLoadedFromDisk else { return }
+        hasLoadedFromDisk = true
+        
+        let fileURL = cacheFileURL
+        
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            logger.info("No cache file found - starting fresh")
+            return
+        }
+        
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let cacheData = try JSONDecoder().decode(CacheData.self, from: data)
+            cache = cacheData.cache
+            insertionOrder = cacheData.insertionOrder
+            logger.info("Loaded \(self.cache.count) cached addresses from disk")
+        } catch {
+            logger.error("Failed to load cache from disk: \(error.localizedDescription)")
+        }
     }
     
     /// Get cached address or perform reverse geocoding.
     func address(for coordinate: CLLocationCoordinate2D) async -> String? {
+        ensureLoaded()
+        
         let key = cacheKey(for: coordinate)
         
-        // Check cache first
+        // Check positive cache first
         if let cached = cache[key] {
             return cached
         }
         
-        // Reverse geocode
-        let location = CLLocation(
-            latitude: coordinate.latitude,
-            longitude: coordinate.longitude
+        // Check negative cache (we already know nothing is there)
+        if notFoundCache.contains(key) {
+            return nil
+        }
+        
+        // Check if we're rate-limited
+        if let rateLimitedUntil, Date() < rateLimitedUntil {
+            logger.debug("Skipping geocode for \(key) - rate limited until \(rateLimitedUntil)")
+            return nil
+        }
+        
+        // Check for in-flight request for same key
+        if let existingTask = inFlightRequests[key] {
+            logger.debug("Joining existing geocode request for \(key)")
+            return await existingTask.value
+        }
+        
+        // Create new geocoding task
+        let task = Task<String?, Never> { [weak self] in
+            guard let self else { return nil }
+            return await self.performGeocode(for: coordinate, key: key)
+        }
+        
+        inFlightRequests[key] = task
+        let result = await task.value
+        inFlightRequests.removeValue(forKey: key)
+        
+        return result
+    }
+    
+    /// Perform the actual geocoding request
+    private func performGeocode(for coordinate: CLLocationCoordinate2D, key: String) async -> String? {
+        // Reverse geocode using MapKit's MKLocalSearch as a point-of-interest lookup
+        let searchRequest = MKLocalSearch.Request()
+        searchRequest.region = MKCoordinateRegion(
+            center: coordinate,
+            latitudinalMeters: 50,
+            longitudinalMeters: 50
         )
         
         do {
-            let placemarks = try await geocoder.reverseGeocodeLocation(location)
-            if let placemark = placemarks.first {
-                let address = formatAddress(placemark)
-                insertWithEviction(key: key, value: address)
-                return address
+            let search = MKLocalSearch(request: searchRequest)
+            let response = try await search.start()
+            
+            // Reset backoff on success
+            currentBackoffSeconds = 1.0
+            rateLimitedUntil = nil
+            
+            if let mapItem = response.mapItems.first {
+                let address = formatAddress(from: mapItem)
+                if !address.isEmpty {
+                    insertWithEviction(key: key, value: address)
+                    return address
+                }
             }
+        } catch let error as MKError {
+            handleGeocodeError(error, key: key)
         } catch {
             logger.debug("Geocoding failed for \(key): \(error.localizedDescription)")
         }
         
         return nil
+    }
+    
+    /// Handle geocoding errors with exponential backoff for rate limiting
+    private func handleGeocodeError(_ error: MKError, key: String) {
+        switch error.code {
+        case .serverFailure, .loadingThrottled:
+            // Rate limited - apply exponential backoff
+            rateLimitedUntil = Date().addingTimeInterval(currentBackoffSeconds)
+            logger.warning("Geocoding rate limited - backing off \(self.currentBackoffSeconds)s")
+            currentBackoffSeconds = min(currentBackoffSeconds * 2, maxBackoffSeconds)
+            
+        case .placemarkNotFound:
+            // Cache negative result so we don't keep asking
+            cacheNotFound(key: key)
+            
+        default:
+            logger.debug("Geocoding failed for \(key): \(error.localizedDescription)")
+        }
+    }
+    
+    /// Cache a "not found" result to avoid repeated lookups
+    private func cacheNotFound(key: String) {
+        // Prune if at capacity
+        if notFoundCache.count >= maxNotFoundEntries {
+            // Remove ~20% of entries (arbitrary pruning)
+            let toRemove = maxNotFoundEntries / 5
+            for _ in 0..<toRemove {
+                if let first = notFoundCache.first {
+                    notFoundCache.remove(first)
+                }
+            }
+        }
+        notFoundCache.insert(key)
     }
     
     /// Insert with LRU eviction if at capacity
@@ -79,34 +206,37 @@ actor GeocodingCache {
     }
     
     /// Round coordinate to 4 decimal places for cache key.
-    private func cacheKey(for coordinate: CLLocationCoordinate2D) -> String {
+    private nonisolated func cacheKey(for coordinate: CLLocationCoordinate2D) -> String {
         let lat = (coordinate.latitude * 10000).rounded() / 10000
         let lon = (coordinate.longitude * 10000).rounded() / 10000
         return "\(lat),\(lon)"
     }
     
-    /// Format placemark into short address string.
-    private func formatAddress(_ placemark: CLPlacemark) -> String {
-        var components: [String] = []
+    /// Format address from MKMapItem (iOS 26+ compatible)
+    private func formatAddress(from mapItem: MKMapItem) -> String {
+        // Use standard placemark properties for reliability
+        let placemark = mapItem.placemark
         
-        // Street address (e.g., "15060 S Grant St")
-        if let subThoroughfare = placemark.subThoroughfare,
+        // precise address: "123 Main St"
+        if let subThoroughfare = placemark.subThoroughfare, 
            let thoroughfare = placemark.thoroughfare {
-            components.append("\(subThoroughfare) \(thoroughfare)")
-        } else if let thoroughfare = placemark.thoroughfare {
-            components.append(thoroughfare)
+            return "\(subThoroughfare) \(thoroughfare)"
         }
         
-        // If no street, try name or locality
-        if components.isEmpty {
-            if let name = placemark.name {
-                components.append(name)
-            } else if let locality = placemark.locality {
-                components.append(locality)
-            }
+        // Street only: "Main St"
+        if let thoroughfare = placemark.thoroughfare {
+            return thoroughfare
         }
         
-        return components.joined(separator: ", ")
+        // Fallback to name (often the POI name, e.g. "Apple Park")
+        if let name = mapItem.name, !name.isEmpty {
+            return name
+        }
+        
+        // Final fallback to the system-formatted title
+        return placemark.title ?? ""
+        
+
     }
     
     /// Clear the cache (e.g., on memory warning).
@@ -122,26 +252,6 @@ actor GeocodingCache {
     private struct CacheData: Codable {
         let cache: [String: String]
         let insertionOrder: [String]
-    }
-    
-    /// Load cache from disk
-    private func loadFromDisk() {
-        let fileURL = cacheFileURL
-        
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            logger.info("No cache file found - starting fresh")
-            return
-        }
-        
-        do {
-            let data = try Data(contentsOf: fileURL)
-            let cacheData = try JSONDecoder().decode(CacheData.self, from: data)
-            cache = cacheData.cache
-            insertionOrder = cacheData.insertionOrder
-            logger.info("Loaded \(self.cache.count) cached addresses from disk")
-        } catch {
-            logger.error("Failed to load cache from disk: \(error.localizedDescription)")
-        }
     }
     
     /// Save cache to disk

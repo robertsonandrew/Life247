@@ -7,183 +7,314 @@
 
 import SwiftUI
 
-/// App settings view with clean, modern design
+// MARK: - Compact Settings Row Components
+
+/// A minimal full-width row for settings with a toggle
+private struct SettingsToggleRow: View {
+    let title: String
+    var subtitle: String? = nil
+    @Binding var isOn: Bool
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.body)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
+    }
+}
+
+/// A minimal full-width navigation row
+private struct SettingsNavRow<Destination: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    let destination: () -> Destination
+    
+    var body: some View {
+        NavigationLink(destination: destination) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color(.systemBackground))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A minimal full-width row with a picker
+private struct SettingsPickerRow<T: Hashable>: View {
+    let title: String
+    var subtitle: String? = nil
+    @Binding var selection: T
+    let options: [(label: String, value: T)]
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.body)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Picker("", selection: $selection) {
+                ForEach(options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
+    }
+}
+
+/// A minimal full-width row showing a static value
+private struct SettingsValueRow: View {
+    let title: String
+    let value: String
+    
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.body)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
+    }
+}
+
+/// Compact section header
+private struct SettingsSectionHeader: View {
+    let title: String
+    
+    var body: some View {
+        Text(title.uppercased())
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 24)
+            .padding(.bottom, 6)
+    }
+}
+
+/// Full-width thin divider
+private struct SettingsDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color(.separator))
+            .frame(height: 0.5)
+    }
+}
+
+// MARK: - Settings View
+
+/// App settings view with clean, compact design
 struct SettingsView: View {
-    @ObservedObject private var airplaneMode = AirplaneModeManager.shared
+    @EnvironmentObject private var syncService: DriveSyncService
     @AppStorage("showSpeedHeatMap") private var showSpeedHeatMap = false
-    @AppStorage("defaultZoomLevel") private var defaultZoomLevel: String = MapZoomLevel.neighborhood.rawValue
+    @AppStorage("showSpeedTrace") private var showSpeedTrace = true
+    @AppStorage("showPlacesOnMap") private var showPlacesOnMap = true
+    @AppStorage("defaultZoomLevel") private var defaultZoomLevel: String = MapZoomLevel.area.rawValue
+    @AppStorage("historyTimeSpan") private var historyTimeSpan: String = HistoryTimeSpan.off.rawValue
     @AppStorage("notifyOnStart") private var notifyOnStart = true
     @AppStorage("notifyOnEnd") private var notifyOnEnd = true
     
-    private var selectedZoomLevel: MapZoomLevel {
-        MapZoomLevel(rawValue: defaultZoomLevel) ?? .neighborhood
-    }
+    @Environment(\.modelContext) private var modelContext
     
     var body: some View {
         NavigationStack {
-            List {
-                // Global Controls
-                Section {
-                    // Airplane Mode
-                    HStack(spacing: 12) {
-                        Image(systemName: "airplane")
-                            .font(.title3)
-                            .foregroundStyle(.orange)
-                            .frame(width: 28)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Airplane Mode")
-                            Text("Pause all tracking")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        
-                        Spacer()
-                        
-                        Toggle("", isOn: $airplaneMode.isEnabled)
-                            .labelsHidden()
-                    }
-                }
-                
-                // Tracking & Locations
-                Section {
-                    NavigationLink {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    // Global Controls
+                    SettingsSectionHeader(title: "")
+                    
+                    AirplaneModeToggleRow()
+                    
+                    // Tracking
+                    SettingsSectionHeader(title: "Tracking")
+                    
+                    SettingsNavRow(title: "Drive Detection") {
                         DriveDetectionSettingsView()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "car.fill")
-                                .font(.title3)
-                                .foregroundStyle(.blue)
-                                .frame(width: 28)
-                            Text("Drive Detection")
-                        }
                     }
-                    
-                    NavigationLink {
+                    SettingsDivider()
+                    SettingsNavRow(title: "Saved Places") {
                         PlacesView()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "mappin.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.red)
-                                .frame(width: 28)
-                            Text("Saved Places")
-                        }
-                    }
-                } header: {
-                    Text("Tracking")
-                }
-                
-                // Notifications
-                Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: "bell.badge.fill")
-                            .font(.title3)
-                            .foregroundStyle(.green)
-                            .frame(width: 28)
-                        Text("Drive Started")
-                        Spacer()
-                        Toggle("", isOn: $notifyOnStart)
-                            .labelsHidden()
-                            .onChange(of: notifyOnStart) { _, enabled in
-                                handleNotificationToggle(enabled: enabled, isStart: true)
-                            }
                     }
                     
-                    HStack(spacing: 12) {
-                        Image(systemName: "flag.checkered")
-                            .font(.title3)
-                            .foregroundStyle(.purple)
-                            .frame(width: 28)
-                        Text("Drive Ended")
-                        Spacer()
-                        Toggle("", isOn: $notifyOnEnd)
-                            .labelsHidden()
-                            .onChange(of: notifyOnEnd) { _, enabled in
-                                handleNotificationToggle(enabled: enabled, isStart: false)
-                            }
-                    }
-                } header: {
-                    Text("Notifications")
-                }
-                
-                // Display
-                Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: "thermometer.medium")
-                            .font(.title3)
-                            .foregroundStyle(.orange)
-                            .frame(width: 28)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Speed Heat Map")
-                            Text("Color routes by speed")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        
-                        Spacer()
-                        
-                        Toggle("", isOn: $showSpeedHeatMap)
-                            .labelsHidden()
-                    }
+                    // Notifications
+                    SettingsSectionHeader(title: "Notifications")
                     
-                    HStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.title3)
-                            .foregroundStyle(.blue)
-                            .frame(width: 28)
-                        
-                        Text("Default Zoom")
-                        
-                        Spacer()
-                        
-                        Picker("", selection: $defaultZoomLevel) {
-                            ForEach(MapZoomLevel.allCases) { level in
-                                Text(level.label).tag(level.rawValue)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                    }
-                } header: {
-                    Text("Display")
-                }
-                
-                // About
-                Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: "info.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(.gray)
-                            .frame(width: 28)
-                        Text("Version")
-                        Spacer()
-                        Text("1.0")
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("About")
+                    NotificationToggleRow(
+                        title: "Drive Started",
+                        isOn: $notifyOnStart,
+                        isStart: true
+                    )
+                    SettingsDivider()
+                    NotificationToggleRow(
+                        title: "Drive Ended",
+                        isOn: $notifyOnEnd,
+                        isStart: false
+                    )
+                    
+                    // Display
+                    SettingsSectionHeader(title: "Display")
+                    
+                    SettingsToggleRow(
+                        title: "Show Saved Places",
+                        subtitle: "Display place markers on map",
+                        isOn: $showPlacesOnMap
+                    )
+                    SettingsDivider()
+                    SettingsToggleRow(
+                        title: "Speed Heat Map",
+                        subtitle: "Color routes by speed",
+                        isOn: $showSpeedHeatMap
+                    )
+                    SettingsDivider()
+                    SettingsToggleRow(
+                        title: "Speed Heatmap in History",
+                        subtitle: "Color mini traces by speed on drive cards",
+                        isOn: $showSpeedTrace
+                    )
+                    SettingsDivider()
+                    SettingsPickerRow(
+                        title: "Default Zoom",
+                        selection: $defaultZoomLevel,
+                        options: MapZoomLevel.allCases.map { ($0.label, $0.rawValue) }
+                    )
+                    SettingsDivider()
+                    SettingsPickerRow(
+                        title: "History Overlay",
+                        subtitle: "Show past routes on map",
+                        selection: $historyTimeSpan,
+                        options: HistoryTimeSpan.allCases.map { ($0.label, $0.rawValue) }
+                    )
+                    
+                    // Backup
+                    SettingsSectionHeader(title: "Backup")
+                    
+                    SyncStatusRow()
+                    
+                    // About
+                    SettingsSectionHeader(title: "About")
+                    
+                    SettingsValueRow(title: "Version", value: "1.0")
+                    
+                    Spacer(minLength: 100)
                 }
             }
+            .background(Color(.systemGroupedBackground))
+            .bottomBarPadding()
             .navigationTitle("Settings")
-            .contentMargins(.bottom, 100, for: .scrollContent)
+        }
+    }
+}
+
+// MARK: - Isolated Subviews (Prevent Parent Re-renders)
+
+/// Isolated airplane mode toggle - only re-renders when its state changes
+private struct AirplaneModeToggleRow: View {
+    @ObservedObject private var airplaneMode = AirplaneModeManager.shared
+    
+    var body: some View {
+        SettingsToggleRow(
+            title: "Airplane Mode",
+            subtitle: "Pause all tracking",
+            isOn: $airplaneMode.isEnabled
+        )
+    }
+}
+
+/// Isolated sync status row - only re-renders when sync state changes
+private struct SyncStatusRow: View {
+    @EnvironmentObject private var syncService: DriveSyncService
+    
+    private var syncStatusText: String {
+        if syncService.syncEnabled {
+            if syncService.isSyncing {
+                return "Syncing..."
+            } else if syncService.pendingCount > 0 {
+                return "\(syncService.pendingCount) pending"
+            } else if syncService.lastError != nil {
+                return "Check connection"
+            } else {
+                return "Up to date"
+            }
+        } else {
+            return "Off"
         }
     }
     
-    // MARK: - Helpers
+    var body: some View {
+        SettingsNavRow(title: "Cloud Sync", subtitle: syncStatusText) {
+            CloudSyncSettingsView()
+        }
+    }
+}
+
+/// Isolated notification toggle with async permission handling
+private struct NotificationToggleRow: View {
+    let title: String
+    @Binding var isOn: Bool
+    let isStart: Bool
     
-    private func handleNotificationToggle(enabled: Bool, isStart: Bool) {
+    var body: some View {
+        SettingsToggleRow(title: title, isOn: $isOn)
+            .onChange(of: isOn) { _, enabled in
+                handleToggle(enabled: enabled)
+            }
+    }
+    
+    private func handleToggle(enabled: Bool) {
         if enabled {
             Task {
                 let granted = await NotificationService.shared.requestPermissionIfNeeded()
                 await MainActor.run {
                     if isStart {
                         NotificationService.shared.notifyOnStart = granted
-                        if !granted { notifyOnStart = false }
+                        if !granted { isOn = false }
                     } else {
                         NotificationService.shared.notifyOnEnd = granted
-                        if !granted { notifyOnEnd = false }
+                        if !granted { isOn = false }
                     }
                 }
             }

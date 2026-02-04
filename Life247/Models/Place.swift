@@ -13,6 +13,9 @@ import CoreLocation
 /// Used for matching stops to meaningful places (Home, Work, Gym, etc.)
 @Model
 final class Place {
+    /// Unique identifier for geofence registration (stable across app launches)
+    /// Default value allows migration from existing Places without this property
+    var placeId: UUID = UUID()
     var name: String
     var latitude: Double
     var longitude: Double
@@ -20,12 +23,14 @@ final class Place {
     var icon: String
     
     init(
+        placeId: UUID = UUID(),
         name: String,
         latitude: Double,
         longitude: Double,
         radiusMeters: Double = 100,
         icon: String = "mappin.circle.fill"
     ) {
+        self.placeId = placeId
         self.name = name
         self.latitude = latitude
         self.longitude = longitude
@@ -41,6 +46,7 @@ final class Place {
         icon: String = "mappin.circle.fill"
     ) {
         self.init(
+            placeId: UUID(),
             name: name,
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
@@ -55,13 +61,23 @@ final class Place {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
     
+    // MARK: - Effective Radius
+    
+    /// The effective radius used for containment checks and geofence registration.
+    /// Uses a minimum of 50 meters to ensure reliable geofence triggering on iOS.
+    /// This prevents the "dead zone" where user-defined small radii (e.g., 20m) would
+    /// cause geofence entry (at 50m) but containment check failure (at 20m).
+    var effectiveRadius: Double {
+        max(50.0, radiusMeters)
+    }
+    
     // MARK: - Containment Check (Pure, no side effects)
     
-    /// Returns true if the given coordinate is within this place's radius.
+    /// Returns true if the given coordinate is within this place's effective radius.
     func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
         let center = CLLocation(latitude: latitude, longitude: longitude)
         let point = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        return center.distance(from: point) <= radiusMeters
+        return center.distance(from: point) <= effectiveRadius
     }
     
     /// Distance from this place to a given coordinate.

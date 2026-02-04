@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import MapKit
 
 /// List of completed drives and inferred stops in a unified timeline.
 struct HistoryView: View {
@@ -21,10 +22,35 @@ struct HistoryView: View {
     
     @State private var timeline: [TimelineItem] = []
     @State private var groupedTimeline: [(key: Date, value: [TimelineItem])] = []
+    @State private var daySummaries: [Date: DaySummary] = [:]
     @State private var frequentStops: FrequentStopAnalysisResult = .empty
     @State private var displayLimit: Int = 10
     @State private var isLoading = true
     private let pageSize: Int = 5
+    
+    // Deletion confirmation state
+    @State private var driveToDelete: Drive?
+    @State private var showDeleteConfirmation = false
+    
+    // Debug inspector state (lifted from DriveRowView to avoid lazy container issue)
+    @State private var inspectorDrive: Drive?
+    
+    // Direct logs sheet state (for View Logs context menu action)
+    @State private var logsDrive: Drive?
+    @State private var logsSelectedCategory: LogCategory? = nil
+    
+    // Programmatic navigation state
+    @State private var selectedDrive: Drive?
+    
+    // Track which drive cards are expanded (most recent pre-expanded)
+    @State private var expandedDriveIDs: Set<UUID> = []
+    @State private var hasInitializedExpansion = false
+    
+    // Sharing state
+    @State private var shareItems: [Any]?
+    @State private var isSharing = false
+    @State private var isGeneratingShare = false
+    @State private var placeSaveRequest: PlaceSaveRequest?
     
     /// Whether there are more items to load
     private var hasMore: Bool {
@@ -61,31 +87,148 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if timeline.isEmpty {
                 Task { await rebuildTimeline() }
             }
         }
         .onChange(of: drives.count) { _, _ in
-            Task { await rebuildTimeline() }
+            scheduleRebuild()
         }
         .onChange(of: places.count) { _, _ in
-            Task { await rebuildTimeline() }
+            scheduleRebuild()
+        }
+
+        .navigationDestination(item: $inspectorDrive) { drive in
+            DriveInspectorView(drive: drive)
+        }
+        .sheet(item: $selectedDrive) { drive in
+            NavigationStack {
+                DriveDetailView(drive: drive)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") {
+                                selectedDrive = nil
+                            }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.regularMaterial)
+        }
+        .confirmationDialog(
+            "Delete Drive?",
+            isPresented: $showDeleteConfirmation, 
+            titleVisibility: .visible
+        ) {
+            Button("Delete Drive", role: .destructive) {
+                if let drive = driveToDelete {
+                    // Delete from context
+                    modelContext.delete(drive)
+                    // Rebuild will trigger automatically via onChange
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                driveToDelete = nil
+            }
+        } message: {
+            Text("This action cannot be undone.")
+        }
+        .sheet(isPresented: $isSharing) {
+            if let items = shareItems {
+                ShareSheet(activityItems: items)
+                    .presentationDetents([.medium, .large])
+            }
+        }
+        .sheet(item: $logsDrive) { drive in
+            TimelineSheetView(
+                entries: drive.logEntriesChronological,
+                selectedCategory: $logsSelectedCategory
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $placeSaveRequest) { request in
+            NavigationStack {
+                SaveAsPlaceView(coordinate: request.coordinate)
+            }
+        }
+    }
+    
+    // MARK: - Debounced Rebuild
+    
+    /// Pending rebuild task (cancelled on new changes)
+    @State private var rebuildTask: Task<Void, Never>?
+    
+    /// Debounce rapid changes - wait 300ms before rebuilding
+    private func scheduleRebuild() {
+        rebuildTask?.cancel()
+        rebuildTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)  // 300ms
+            guard !Task.isCancelled else { return }
+            await rebuildTimeline()
         }
     }
     
     private var timelineList: some View {
         List {
             ForEach(visibleGroupedItems, id: \.key) { date, items in
+                let (displayItems, stopSummaries) = mergeStops(in: items)
                 Section {
-                    ForEach(items) { item in
-                        timelineRow(for: item)
+                    ForEach(Array(displayItems.enumerated()), id: \.element.id) { index, item in
+                        let isFirst = index == 0
+                        let isLast = index == displayItems.count - 1
+                        let showDivider = index > 0 && displayItems[index - 1].isStop != item.isStop
+                        let stopSummaryText: String? = {
+                            if case .drive(let drive, _, _, _) = item {
+                                return stopSummaries[drive.id]?.summaryText
+                            }
+                            return nil
+                        }()
+                        let stopCanSavePlace: Bool = {
+                            if case .drive(let drive, _, _, _) = item {
+                                return stopSummaries[drive.id]?.canSavePlace ?? false
+                            }
+                            return false
+                        }()
+                        let stopSaveAction: (() -> Void)? = {
+                            if case .drive(let drive, _, _, _) = item,
+                               let summary = stopSummaries[drive.id],
+                               summary.canSavePlace {
+                                return { placeSaveRequest = PlaceSaveRequest(coordinate: summary.coordinate) }
+                            }
+                            return nil
+                        }()
+
+                        VStack(spacing: 8) {
+                            if showDivider {
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.08))
+                                    .frame(height: 1)
+                                    .padding(.vertical, 2)
+                            }
+                            timelineRow(
+                                for: item,
+                                isFirst: isFirst,
+                                isLast: isLast,
+                                stopSummaryText: stopSummaryText,
+                                stopCanSavePlace: stopCanSavePlace,
+                                onSaveStop: stopSaveAction
+                            )
+                        }
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                     }
                 } header: {
-                    Text(date, style: .date)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
+                    DayHeaderView(
+                        date: date,
+                        summary: daySummaries[date]
+                    )
                 }
+                .textCase(nil)
             }
             
             // Load More button
@@ -100,53 +243,144 @@ struct HistoryView: View {
                         }
                     }
                 }
+                .listRowBackground(Color.clear)
             }
         }
-        .listStyle(.insetGrouped)
-        .contentMargins(.bottom, 180, for: .scrollContent)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(uiColor: .systemGroupedBackground))
+        .bottomBarPadding()
     }
+
+
     
     @ViewBuilder
-    private func timelineRow(for item: TimelineItem) -> some View {
+    private func timelineRow(
+        for item: TimelineItem,
+        isFirst: Bool,
+        isLast: Bool,
+        stopSummaryText: String? = nil,
+        stopCanSavePlace: Bool = false,
+        onSaveStop: (() -> Void)? = nil
+    ) -> some View {
         switch item {
-        case .drive(let drive):
-            NavigationLink(destination: DriveDetailView(drive: drive)) {
-                DriveRowView(drive: drive)
-            }
-            .swipeActions(edge: .trailing) {
-                Button(role: .destructive) {
-                    modelContext.delete(drive)
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
+        case .drive(let drive, let trace, let maxSpeedMPH, let destinationName):
+            CalmDriveCard(
+                drive: drive,
+                trace: trace,
+                maxSpeedMPH: maxSpeedMPH,
+                destinationName: destinationName,
+                stopSummaryText: stopSummaryText,
+                stopCanSavePlace: stopCanSavePlace,
+                isExpanded: Binding(
+                    get: { expandedDriveIDs.contains(drive.id) },
+                    set: { newValue in
+                        if newValue {
+                            expandedDriveIDs.insert(drive.id)
+                        } else {
+                            expandedDriveIDs.remove(drive.id)
+                        }
+                    }
+                ),
+                onViewDetails: { selectedDrive = drive },
+                onSaveStop: onSaveStop,
+                onInspector: { inspectorDrive = drive },
+                onShare: {
+                    Task { await generateShareImage(for: drive) }
+                },
+                onDelete: {
+                    driveToDelete = drive
+                    showDeleteConfirmation = true
+                },
+                onViewLogs: { logsDrive = drive }
+            )
+
             
         case .stop(let stop):
             let frequentInfo = frequentStops.stopToCandidate[stop.id]
-            NavigationLink(destination: StopDetailView(stop: stop, frequentStopInfo: frequentInfo)) {
-                StopRowView(
-                    stop: stop,
-                    frequentStopInfo: frequentStops.stopToCandidate[stop.id]
+            if stop.matchedPlace == nil, let frequentInfo {
+                SuggestedPlaceRowView(
+                    candidate: frequentInfo,
+                    durationText: stop.formattedDuration,
+                    onAdd: {
+                        placeSaveRequest = PlaceSaveRequest(coordinate: frequentInfo.coordinate)
+                    }
                 )
+            } else {
+                NavigationLink(destination: StopDetailView(stop: stop, frequentStopInfo: frequentInfo)) {
+                    StopRowView(
+                        stop: stop,
+                        frequentStopInfo: frequentInfo,
+                        onSavePlace: stop.matchedPlace == nil
+                            ? { placeSaveRequest = PlaceSaveRequest(coordinate: stop.location) }
+                            : nil
+                    )
+                }
             }
         }
+    }
+
+    private func mergeStops(in items: [TimelineItem]) -> ([TimelineItem], [UUID: StopSummary]) {
+        var result: [TimelineItem] = []
+        var stopSummaries: [UUID: StopSummary] = [:]
+
+        var index = 0
+        while index < items.count {
+            let item = items[index]
+            if case .stop(let stop) = item,
+               index + 1 < items.count,
+               case .drive(let drive, _, _, _) = items[index + 1] {
+                let stopName = stop.displayName
+                let canSavePlace = stop.matchedPlace == nil
+                if stopName != "Stopped" {
+                    stopSummaries[drive.id] = StopSummary(
+                        summaryText: "Stop · \(stopName) · \(stop.formattedDuration)",
+                        coordinate: stop.location,
+                        canSavePlace: canSavePlace
+                    )
+                } else {
+                    stopSummaries[drive.id] = StopSummary(
+                        summaryText: "Stop · \(stop.formattedDuration)",
+                        coordinate: stop.location,
+                        canSavePlace: canSavePlace
+                    )
+                }
+                index += 1
+                continue
+            }
+            result.append(item)
+            index += 1
+        }
+
+        return (result, stopSummaries)
+    }
+
+    private struct StopSummary {
+        let summaryText: String
+        let coordinate: CLLocationCoordinate2D
+        let canSavePlace: Bool
     }
     
     private func loadMore() {
         displayLimit += pageSize
+        // Rebuild timeline with new limit to fetch more drives
+        scheduleRebuild()
     }
     
     private func rebuildTimeline() async {
         // Snapshot inputs (value semantics)
         let drivesSnapshot = drives
         let placesSnapshot = places
-        
-        // Do heavy work off main actor
-        let result = await Task.detached(priority: .userInitiated) {
-            // Build timeline
+        let currentLimit = displayLimit + pageSize  // Build slightly ahead for smooth pagination
+
+        // SwiftData models are MainActor-isolated under Swift 6 strict concurrency.
+        // Keep this work on the current actor to avoid cross-actor violations.
+        let result = await Task(priority: .userInitiated) {
+            // Build timeline (only for visible drives + buffer)
             let timeline = await TimelineBuilder.buildTimeline(
                 drives: drivesSnapshot,
-                places: placesSnapshot
+                places: placesSnapshot,
+                limit: currentLimit
             )
             
             // Extract stops for analysis
@@ -168,8 +402,18 @@ struct HistoryView: View {
             }
             let sortedGroups = grouped.sorted { $0.key > $1.key }
                 .map { (key: $0.key, value: $0.value) }
+
+            // Pre-compute day summaries (full-day counts, not paginated)
+            var summaries: [Date: DaySummary] = [:]
+            for (day, dayItems) in grouped {
+                let driveCount = dayItems.reduce(into: 0) { acc, item in
+                    if case .drive = item { acc += 1 }
+                }
+                let stopCount = dayItems.count - driveCount
+                summaries[day] = DaySummary(drives: driveCount, stops: stopCount)
+            }
             
-            return (timeline, frequent, sortedGroups)
+            return (timeline, frequent, sortedGroups, summaries)
         }.value
         
         // Single UI commit on main actor
@@ -177,10 +421,113 @@ struct HistoryView: View {
             self.timeline = result.0
             self.frequentStops = result.1
             self.groupedTimeline = result.2
+            self.daySummaries = result.3
             self.isLoading = false
         }
     }
+
+    @MainActor
+    private func generateShareImage(for drive: Drive) async {
+        isGeneratingShare = true
+        defer { isGeneratingShare = false }
+        
+        // 1. Configure options
+        let options = MKMapSnapshotter.Options()
+        if let bounds = drive.routeBounds {
+            options.region = MKCoordinateRegion(center: bounds.center, span: bounds.span)
+        }
+        options.size = CGSize(width: 600, height: 400)
+        let displayScale = UITraitCollection.current.displayScale
+        options.traitCollection = UITraitCollection(mutations: { traits in
+            traits.userInterfaceStyle = .dark
+            traits.displayScale = displayScale
+        })
+        
+        // 2. Take snapshot
+        let snapshotter = MKMapSnapshotter(options: options)
+        do {
+            let snapshot = try await snapshotter.start()
+            
+            // 3. Draw route
+            let renderer = UIGraphicsImageRenderer(size: options.size)
+            let image = renderer.image { context in
+                // Draw map
+                snapshot.image.draw(at: .zero)
+                
+                // Draw route trace
+                let points = drive.pointsChronological.map { snapshot.point(for: $0.coordinate) }
+                if points.count > 1 {
+                    let path = UIBezierPath()
+                    path.move(to: points[0])
+                    for point in points.dropFirst() {
+                        path.addLine(to: point)
+                    }
+                    
+                    // Gradient-like stroke (simplified as solid for share)
+                    UIColor.systemBlue.setStroke()
+                    path.lineWidth = 4
+                    path.lineCapStyle = .round
+                    path.lineJoinStyle = .round
+                    path.stroke()
+                }
+                
+                // Draw title overlay
+                let title = "Drive: \(drive.formattedDistance)"
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 20, weight: .bold),
+                    .foregroundColor: UIColor.white
+                ]
+                let str = NSAttributedString(string: title, attributes: attrs)
+                str.draw(at: CGPoint(x: 20, y: 20))
+            }
+            
+            self.shareItems = [image, "Check out my drive!"]
+            self.isSharing = true
+        } catch {
+            print("Failed to generate snapshot: \(error)")
+        }
+    }
 }
+
+// MARK: - Day Header
+
+private struct DaySummary: Sendable {
+    let drives: Int
+    let stops: Int
+}
+
+private struct DayHeaderView: View {
+    let date: Date
+    let summary: DaySummary?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(date, style: .date)
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            if let summary {
+                Text("\(summary.drives) drive\(summary.drives == 1 ? "" : "s") • \(summary.stops) stop\(summary.stops == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+}
+
+private struct PlaceSaveRequest: Identifiable {
+    let id = UUID()
+    let coordinate: CLLocationCoordinate2D
+}
+
+// MARK: - Timeline Connector
+
+/// Wraps a timeline item with a vertical connector line to show chronological flow
+// MARK: - Timeline Connector
+
+/// Wraps a timeline item with a vertical connector line (Solid Subway Style)
 
 // MARK: - Empty State
 
@@ -194,62 +541,9 @@ struct EmptyHistoryView: View {
     }
 }
 
-// MARK: - Drive Row
-
-struct DriveRowView: View {
-    let drive: Drive
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Type label
-            HStack {
-                Text("DRIVE")
-                    .font(.caption2)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.blue)
-                Spacer()
-            }
-            
-            // Mini map (static snapshot)
-            if drive.points.count > 1 {
-                MiniRouteMap(drive: drive, height: 160)
-            }
-            
-            // Stats row - balanced 4-column layout
-            HStack(spacing: 16) {
-                // Start time
-                statItem(value: drive.startTime.formatted(date: .omitted, time: .shortened), label: "Time")
-                
-                // Duration
-                statItem(value: drive.formattedDuration, label: "Duration")
-                
-                // Distance
-                statItem(value: drive.formattedDistance, label: "Distance")
-                
-                // Max speed
-                statItem(value: String(format: "%.0f", drive.maxSpeedMPH), label: "Max mph")
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding(.vertical, 4)
-    }
-    
-    private func statItem(value: String, label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .monospacedDigit()
-            
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
 #Preview {
     HistoryView()
         .modelContainer(for: [Drive.self, Place.self], inMemory: true)
 }
+
+// MARK: - Share Sheet (Moved to Shared Component)

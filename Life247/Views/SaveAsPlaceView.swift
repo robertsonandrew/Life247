@@ -12,74 +12,63 @@ import MapKit
 /// Simplified Place creation flow with pre-filled coordinate.
 struct SaveAsPlaceView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var syncService: DriveSyncService
     @Environment(\.dismiss) private var dismiss
     
-    let coordinate: CLLocationCoordinate2D
+    /// Initial coordinate (can be adjusted via map)
+    let initialCoordinate: CLLocationCoordinate2D
     
     @State private var name = ""
     @State private var selectedIcon = "mappin.circle.fill"
     @State private var radius: Double = 100
+    @State private var coordinate: CLLocationCoordinate2D
     
-    private let radiusPresets: [Double] = [50, 100, 250]
+    init(coordinate: CLLocationCoordinate2D) {
+        self.initialCoordinate = coordinate
+        self._coordinate = State(initialValue: coordinate)
+    }
     
     var body: some View {
-        Form {
-            Section("Name") {
-                TextField("Place name", text: $name)
-            }
-            
-            Section("Icon") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(Place.commonIcons, id: \.icon) { item in
-                            Button {
-                                selectedIcon = item.icon
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: item.icon)
-                                        .font(.title2)
-                                        .foregroundStyle(selectedIcon == item.icon ? .blue : .secondary)
-                                    Text(item.name)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            Form {
+                Section("Name") {
+                    TextField("Place name", text: $name)
+                }
+                
+                Section("Icon") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(Place.commonIcons, id: \.icon) { item in
+                                Button {
+                                    selectedIcon = item.icon
+                                } label: {
+                                    VStack(spacing: 4) {
+                                        Image(systemName: item.icon)
+                                            .font(.title2)
+                                            .foregroundStyle(selectedIcon == item.icon ? .blue : .secondary)
+                                        Text(item.name)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(width: 60)
                                 }
-                                .frame(width: 60)
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 8)
                 }
+                
             }
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            .frame(height: 240)
             
-            Section("Radius") {
-                Picker("Radius", selection: $radius) {
-                    ForEach(radiusPresets, id: \.self) { preset in
-                        Text("\(Int(preset))m").tag(preset)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            
-            Section("Location") {
-                Map {
-                    Annotation("", coordinate: coordinate) {
-                        Circle()
-                            .fill(.blue.opacity(0.3))
-                            .frame(width: CGFloat(radius / 5), height: CGFloat(radius / 5))
-                            .overlay(
-                                Circle()
-                                    .stroke(.blue, lineWidth: 2)
-                            )
-                            .overlay(
-                                Image(systemName: selectedIcon)
-                                    .foregroundStyle(.blue)
-                            )
-                    }
-                }
-                .frame(height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
+            InteractiveGeofenceMap(
+                coordinate: $coordinate,
+                radiusMeters: $radius,
+                icon: selectedIcon
+            )
         }
         .navigationTitle("Save as Place")
         .navigationBarTitleDisplayMode(.inline)
@@ -105,6 +94,12 @@ struct SaveAsPlaceView: View {
         )
         
         modelContext.insert(place)
+        
+        // Sync to server
+        Task {
+            await syncService.syncPlace(place)
+        }
+        
         dismiss()
     }
 }

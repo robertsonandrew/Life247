@@ -16,8 +16,11 @@ enum DriveEvent {
     /// CoreMotion detected automotive activity
     case motionAutomotive(confidence: CMMotionActivityConfidence)
     
-    /// CoreMotion detected non-automotive activity (walking, stationary, etc.)
+    /// CoreMotion detected non-automotive activity (stationary, cycling, etc.)
     case motionNotAutomotive
+    
+    /// CoreMotion detected user is on foot (walking or running) - strong signal of drive end
+    case motionOnFoot
     
     /// New GPS location received
     case locationUpdate(CLLocation)
@@ -25,11 +28,17 @@ enum DriveEvent {
     /// Significant location change triggered (wakes app)
     case significantLocationChange
     
-    /// CLVisit arrival detected
-    case visitArrival
+    /// CLVisit arrival detected (contains timestamp + coordinate)
+    case visitArrival(CLVisit)
     
-    /// CLVisit departure detected
-    case visitDeparture
+    /// CLVisit departure detected (contains timestamp + coordinate)
+    case visitDeparture(CLVisit)
+    
+    /// Geofence exit detected for a monitored region
+    case geofenceExit(regionId: String)
+    
+    /// Geofence entry detected for a monitored region (arrived at saved place)
+    case geofenceEntry(regionId: String)
     
     /// A state machine timer expired
     case timerExpired(TimerKind)

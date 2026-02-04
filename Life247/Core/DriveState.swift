@@ -24,6 +24,10 @@ enum DriveState: String, Codable, Equatable {
     /// Drive active but speed ≈ 0, GPS still running
     /// Could transition back to driving or end
     case stopped
+
+    /// Transitory validation state for geofence arrivals
+    /// Waiting to confirm arrival or resume driving
+    case pendingArrival
     
     /// Drive finalized, no GPS recording
     /// Drive object has been saved with endTime

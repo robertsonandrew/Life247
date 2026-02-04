@@ -19,21 +19,25 @@ struct TimelineBuilder {
     /// - Parameters:
     ///   - drives: Completed drives sorted by startTime descending (newest first)
     ///   - places: User-defined places for matching
+    ///   - limit: Optional limit on number of drives to process (for pagination performance)
     /// - Returns: Interleaved timeline items (drives and stops)
     static func buildTimeline(
         drives: [Drive],
-        places: [Place]
+        places: [Place],
+        limit: Int? = nil
     ) async -> [TimelineItem] {
         guard !drives.isEmpty else { return [] }
         
         var items: [TimelineItem] = []
         
-        // Drives are already sorted newest first
-        let sortedDrives = drives
+        // Apply limit for pagination performance - only process needed drives
+        let sortedDrives = limit.map { Array(drives.prefix($0)) } ?? drives
         
         for (index, drive) in sortedDrives.enumerated() {
-            // Add the drive
-            items.append(.drive(drive))
+            // Add the drive (uses cached maxSpeedMPH if available)
+            let maxSpeed = drive.maxSpeedMPH
+            let destinationName = destinationName(for: drive, places: places)
+            items.append(.drive(drive, trace: drive.tracePointsWithSpeed, maxSpeedMPH: maxSpeed, destinationName: destinationName))
             
             // Check for stop between this drive and the next (older) one
             if index < sortedDrives.count - 1 {
@@ -44,12 +48,97 @@ struct TimelineBuilder {
                     before: drive,
                     places: places
                 ) {
+                    // We found a stop following 'nextDrive' (which is actually older in sortedDrives). 
+                    // Wait, sortedDrives is "newest first".
+                    // Drive[0] is most recent. Drive[1] is older.
+                    // Stop happens BETWEEN Drive[1] (older) and Drive[0] (newer).
+                    // So the stop is the DESTINATION of Drive[1].
+                    // My previous logic: "If index < sortedDrives.count - 1".
+                    // The inferStop is called with "after: nextDrive (older)" and "before: drive (newer)".
+                    // Stop is between nextDrive and drive.
+                    // So Stop is the destination of NEXTDRIVE (the older one).
+                    // Drive[0] (newest) has NO known destination stop unless we check the ongoing state (which isn't here).
+                    
+                    // So when we find a stop here, we should update the LAST added drive... which is 'drive' (the NEWER one)? NO.
+                    // Let's trace:
+                    // Loop index 0: Drive A (Newest). Added to items[0].
+                    // Check gap between Drive A and Drive B (Older).
+                    // If Stop S exists: It is between B and A.
+                    // So B -> S -> A.
+                    // So Stop S is the destination of Drive B.
+                    // But Drive B hasn't been added yet! It will be added in iteration index 1.
+                    
+                    // Logic mismatch.
+                    // Let's re-read buildTimeline.
+                    // "drives: Completed drives sorted by startTime descending (newest first)"
+                    // Loop enumerates drives.
+                    // Item append order: Newest item first?
+                    // "items.append(.drive(drive...))"
+                    // If inputs are A, B, C (A=Newest)
+                    // Loop 0: Append A. Check gap A-B. Stop S1 found. Stop S1 is start of A, end of B.
+                    // Loop 1: Append B. Check gap B-C. Stop S2 found. Stop S2 is start of B, end of C.
+                    
+                    // So:
+                    // Drive B ends at Stop S1.
+                    // Drive C ends at Stop S2.
+                    // Drive A ends at... unknown (current time/now).
+                    
+                    // So if I find a stop between A and B, that stop is B's destination.
+                    // I haven't added B yet.
+                    
+                    // Strategy adjustment:
+                    // Pass 1: Build basic list with stops.
+                    // Pass 2: Iterate and link.
+                    // Since the list is reversed (newest first), if `items[i]` is a Stop and `items[i+1]` is a Drive, then `items[i+1].destination = items[i].name`.
+                    // (Assuming timeline order matches drive order).
+                    
                     items.append(.stop(stop))
                 }
             }
         }
         
-        return items
+        // Pass 2: Link drives to their destination stops
+        // Timeline is [Drive A, Stop S1, Drive B, Stop S2, Drive C]
+        // Stop S1 follows Drive B (in time)? No.
+        // Array order is Newest -> Oldest.
+        // Time: Drive C -> S2 -> Drive B -> S1 -> Drive A.
+        // Array: A, S1, B, S2, C.
+        // S1 is the START of A. S1 is the END of B.
+        // So B's destination is S1. B is at index i+2 relative to A?
+        // Pattern: ... Stop(S), Drive(D) ...
+        // Since list is Newest -> Oldest:
+        // S comes BEFORE D in the list? No, S happens BEFORE A.
+        // Wait, timeline build order:
+        // inferStop(after: nextDrive (older/B), before: drive (newer/A))
+        // Returns stop S. S.startTime = B.endTime. S.endTime = A.startTime.
+        // So S is Chronologically AFTER B.
+        // So S is B's destination.
+        // In the list `items`, we appended A, then appended S.
+        // Next loop, we append B.
+        // So list is [A, S, B, ...].
+        // So if we see [Stop, Drive], that Stop is the destination of that Drive.
+        
+        // Let's implement Pass 2.
+        
+        var linkedItems = items
+        for i in 0..<linkedItems.count - 1 {
+            if case .stop(let stop) = linkedItems[i],
+               case .drive(let drive, let trace, let maxSpeed, let existingName) = linkedItems[i+1] {
+                   // Found a Stop followed by a Drive (in array order, meaning Drive -> Stop in time)
+                   // Verify? Array index 0 is newest. Index 10 is oldest.
+                   // i (Stop S) is newer than i+1 (Drive D).
+                   // Logic: D -> S.
+                   // So D is older than S.
+                   // Correct. D's destination is S.
+                   if let placeName = stop.matchedPlace?.name {
+                       linkedItems[i+1] = .drive(drive, trace: trace, maxSpeedMPH: maxSpeed, destinationName: placeName)
+                   } else {
+                       linkedItems[i+1] = .drive(drive, trace: trace, maxSpeedMPH: maxSpeed, destinationName: existingName)
+                   }
+            }
+        }
+        
+        return linkedItems
     }
     
     /// Infer a stop between two consecutive drives.
@@ -72,21 +161,23 @@ struct TimelineBuilder {
         // Ignore short gaps (< 2 minutes)
         guard gap >= minimumStopDuration else { return nil }
         
-        // Stop location = last point of previous drive
-        guard let lastPoint = previousDrive.points.last else { return nil }
-        let stopLocation = lastPoint.coordinate
-        
-        // Match to nearest place
-        let matchedPlace = findNearestContainingPlace(
-            for: stopLocation,
-            in: places
-        )
-        
-        // Geocode address if no place match
-        var address: String? = nil
-        if matchedPlace == nil {
-            address = await GeocodingCache.shared.address(for: stopLocation)
+        // Stop location = end snapshot (fallbacks to last point)
+        guard let stopLocation = previousDrive.endCoordinateSnapshot else { return nil }
+
+        // Match to saved place (prefer explicit endPlaceId if set)
+        var matchedPlace: Place?
+        if let endPlaceId = previousDrive.endPlaceId {
+            matchedPlace = places.first { $0.placeId == endPlaceId }
         }
+        if matchedPlace == nil {
+            matchedPlace = findNearestContainingPlace(
+                for: stopLocation,
+                in: places
+            )
+        }
+        
+        // NOTE: Address geocoding is now lazy - handled by StopRowView
+        // This prevents N serial geocoding calls from blocking timeline build
         
         return InferredStop(
             id: UUID(),
@@ -94,7 +185,7 @@ struct TimelineBuilder {
             startTime: previousEndTime,
             endTime: nextDrive.startTime,
             matchedPlace: matchedPlace,
-            address: address
+            address: nil  // Lazy loaded by view
         )
     }
     
@@ -109,5 +200,18 @@ struct TimelineBuilder {
         return containingPlaces.min { a, b in
             a.distance(to: coordinate) < b.distance(to: coordinate)
         }
+    }
+
+    /// Determine a destination name directly from a drive (used when no inferred stop exists).
+    private static func destinationName(for drive: Drive, places: [Place]) -> String? {
+        if let endPlaceId = drive.endPlaceId,
+           let place = places.first(where: { $0.placeId == endPlaceId }) {
+            return place.name
+        }
+        if let coord = drive.endCoordinateSnapshot,
+           let place = findNearestContainingPlace(for: coord, in: places) {
+            return place.name
+        }
+        return nil
     }
 }

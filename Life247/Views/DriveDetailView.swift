@@ -6,14 +6,42 @@
 //
 
 import SwiftUI
+import SwiftData
 import MapKit
 
 /// Detailed view of a single drive with map visualization and statistics.
 struct DriveDetailView: View {
     let drive: Drive
+    @EnvironmentObject private var syncService: DriveSyncService
+    @Query private var places: [Place]
     
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var isMapExpanded = false
+    @State private var showAccelerationEvents = true
+    
+    /// Places relevant to this drive (within or near the route bounds)
+    private var relevantPlaces: [Place] {
+        guard let bounds = drive.routeBounds else { return [] }
+        
+        // Expand bounds slightly to catch places at start/end
+        let expandedSpan = MKCoordinateSpan(
+            latitudeDelta: bounds.span.latitudeDelta * 1.5,
+            longitudeDelta: bounds.span.longitudeDelta * 1.5
+        )
+        let region = MKCoordinateRegion(center: bounds.center, span: expandedSpan)
+        
+        return places.filter { place in
+            let lat = place.coordinate.latitude
+            let lon = place.coordinate.longitude
+            
+            let minLat = region.center.latitude - region.span.latitudeDelta / 2
+            let maxLat = region.center.latitude + region.span.latitudeDelta / 2
+            let minLon = region.center.longitude - region.span.longitudeDelta / 2
+            let maxLon = region.center.longitude + region.span.longitudeDelta / 2
+            
+            return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
+        }
+    }
     
     var body: some View {
         ScrollView {
@@ -24,18 +52,26 @@ struct DriveDetailView: View {
                 // Stats
                 statsSection
                 
+                // G-Force Events (if any)
+                if !drive.accelerationEvents.isEmpty {
+                    accelerationSection
+                }
+                
                 // Details
                 detailsSection
+                
+                // Cloud Sync (Surgical Fix)
+                syncSection
             }
         }
-        .contentMargins(.bottom, 100, for: .scrollContent)
+        .bottomBarPadding()
         .navigationTitle("Drive Details")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             setupCamera()
         }
         .fullScreenCover(isPresented: $isMapExpanded) {
-            ExpandedMapView(drive: drive)
+            ExpandedMapView(drive: drive, showAccelerationEvents: showAccelerationEvents)
         }
     }
     
@@ -51,8 +87,33 @@ struct DriveDetailView: View {
                     RoutePolyline(
                         points: drive.pointsChronological,
                         mode: showSpeedHeatMap ? .heatMap : .solid,
-                        lineWidth: 5
+                        lineWidth: 7
                     )
+                }
+                
+                // Acceleration event markers
+                if showAccelerationEvents {
+                    ForEach(drive.accelerationEvents, id: \.id) { event in
+                        Annotation(event.eventType.displayName, coordinate: event.coordinate) {
+                            AccelerationEventMarker(event: event, size: .regular)
+                        }
+                    }
+                }
+                
+                // Saved places (only those relevant to this drive)
+                ForEach(relevantPlaces) { place in
+                    MapCircle(center: place.coordinate, radius: place.radiusMeters)
+                        .foregroundStyle(.orange.opacity(0.15))
+                        .stroke(.orange, lineWidth: 2)
+                    
+                    Annotation(place.name, coordinate: place.coordinate) {
+                        Image(systemName: place.icon)
+                            .font(.caption)
+                            .foregroundStyle(.white)
+                            .padding(6)
+                            .background(Circle().fill(.orange))
+                            .shadow(radius: 2)
+                    }
                 }
                 
                 // Start marker
@@ -77,27 +138,42 @@ struct DriveDetailView: View {
             }
             .mapStyle(.standard(elevation: .realistic))
             
-            // Expand button
-            Button {
-                isMapExpanded = true
-            } label: {
-                HStack(spacing: 6) {
-                    Text("Expand")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption)
+            // Controls
+            VStack(spacing: 8) {
+                // Event toggle (only if events exist)
+                if !drive.accelerationEvents.isEmpty {
+                    Button {
+                        showAccelerationEvents.toggle()
+                    } label: {
+                        Image(systemName: showAccelerationEvents ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
+                            .font(.headline)
+                            .foregroundStyle(showAccelerationEvents ? .orange : .primary)
+                            .padding(10)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
                 }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial)
-                .clipShape(Capsule())
+                
+                // Expand button
+                Button {
+                    isMapExpanded = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
             }
             .padding(12)
         }
         .frame(height: 300)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .contentShape(Rectangle())  // Makes entire area tappable
+        .onTapGesture {
+            isMapExpanded = true
+        }
         .padding()
     }
     
@@ -126,6 +202,93 @@ struct DriveDetailView: View {
         .padding(.horizontal)
     }
     
+    // MARK: - Acceleration Events Section
+    
+    private var accelerationSection: some View {
+        GroupBox {
+            VStack(spacing: 16) {
+                // Summary row
+                HStack(spacing: 20) {
+                    EventCountBadge(
+                        count: drive.hardBrakeCount,
+                        label: "Brakes",
+                        color: .red,
+                        icon: "arrow.down.circle.fill"
+                    )
+                    
+                    EventCountBadge(
+                        count: drive.hardAccelCount,
+                        label: "Accels",
+                        color: .orange,
+                        icon: "arrow.up.circle.fill"
+                    )
+                    
+                    EventCountBadge(
+                        count: drive.hardCornerCount,
+                        label: "Corners",
+                        color: .yellow,
+                        icon: "arrow.turn.up.right"
+                    )
+                    
+                    if let maxG = drive.maxGForce {
+                        EventCountBadge(
+                            count: nil,
+                            label: "Max G",
+                            value: String(format: "%.2f", maxG),
+                            color: .purple,
+                            icon: "speedometer"
+                        )
+                    }
+                }
+                
+                // Event list (collapsible)
+                if drive.accelerationEvents.count <= 5 {
+                    eventsList
+                } else {
+                    DisclosureGroup("All Events (\(drive.accelerationEvents.count))") {
+                        eventsList
+                    }
+                }
+            }
+        } label: {
+            Label("G-Force Events", systemImage: "exclamationmark.triangle")
+        }
+        .padding(.horizontal)
+        .padding(.top)
+    }
+    
+    private var eventsList: some View {
+        VStack(spacing: 8) {
+            ForEach(drive.accelerationEvents.sorted(by: { $0.timestamp < $1.timestamp }), id: \.id) { event in
+                HStack {
+                    AccelerationEventMarker(event: event, size: .small)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(event.eventType.displayName)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text(event.timestamp.formatted(date: .omitted, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(event.formattedG)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                        Text("\(Int(event.speedMPH)) mph")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+    
     // MARK: - Details Section
     
     private var detailsSection: some View {
@@ -136,6 +299,8 @@ struct DriveDetailView: View {
                     DetailRow(label: "Started", value: drive.startTime.formatted(date: .abbreviated, time: .shortened))
                     Divider()
                     DetailRow(label: "Ended", value: drive.endTime?.formatted(date: .abbreviated, time: .shortened) ?? "In Progress")
+                    Divider()
+                    DetailRow(label: "Outcome", value: endReasonLabel)
                 }
             } label: {
                 Label("Time", systemImage: "clock")
@@ -165,6 +330,82 @@ struct DriveDetailView: View {
         }
         .padding()
     }
+
+    private var endReasonLabel: String {
+        guard let endReason = drive.endReason else {
+            return "In Progress"
+        }
+        switch endReason {
+        case .visitArrival, .geofenceEntry, .geofenceEntryLowSpeed:
+            return "Arrived"
+        case .user:
+            return "Manual End"
+        case .walkingDetected:
+            return "On Foot"
+        case .inactivityTimeout:
+            return "Auto End"
+        case .safetyTimeout:
+            return "Safety End"
+        case .stuckRecovery:
+            return "Recovered"
+        case .appTermination, .systemSuspension, .lowBattery:
+            return "System End"
+        }
+    }
+    
+    // MARK: - Sync Section
+    
+    private var syncSection: some View {
+        GroupBox {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Status: \(drive.syncStatusDisplay)")
+                        .fontWeight(.medium)
+                        .foregroundStyle(statusColor)
+                    
+                    if let date = drive.syncedAt {
+                        Text(date.formatted())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                Button {
+                    // Manual Re-Sync (Surgical Fix)
+                    Task {
+                        // Reset status to allow re-queue
+                        drive.syncStatus = "pending"
+                        syncService.queueDrive(drive)
+                    }
+                } label: {
+                    Text("Sync Now")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.blue.opacity(0.1))
+                        .foregroundStyle(.blue)
+                        .clipShape(Capsule())
+                }
+                .disabled(drive.syncStatus == "pending")
+            }
+        } label: {
+            Label("Cloud Sync", systemImage: "icloud")
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 20)
+    }
+    
+    private var statusColor: Color {
+        switch drive.syncStatus {
+        case "synced": return .green
+        case "failed": return .red
+        case "pending": return .orange
+        default: return .secondary
+        }
+    }
     
     // MARK: - Helpers
     
@@ -178,10 +419,37 @@ struct DriveDetailView: View {
 
 struct ExpandedMapView: View {
     let drive: Drive
+    var showAccelerationEvents: Bool = true
+    
     @Environment(\.dismiss) private var dismiss
+    @Query private var places: [Place]
     
     @State private var cameraPosition: MapCameraPosition = .automatic
+    @State private var showEvents: Bool = true
     @AppStorage("showSpeedHeatMap") private var showSpeedHeatMap = false
+    
+    /// Places relevant to this drive (within or near the route bounds)
+    private var relevantPlaces: [Place] {
+        guard let bounds = drive.routeBounds else { return [] }
+        
+        let expandedSpan = MKCoordinateSpan(
+            latitudeDelta: bounds.span.latitudeDelta * 1.5,
+            longitudeDelta: bounds.span.longitudeDelta * 1.5
+        )
+        let region = MKCoordinateRegion(center: bounds.center, span: expandedSpan)
+        
+        return places.filter { place in
+            let lat = place.coordinate.latitude
+            let lon = place.coordinate.longitude
+            
+            let minLat = region.center.latitude - region.span.latitudeDelta / 2
+            let maxLat = region.center.latitude + region.span.latitudeDelta / 2
+            let minLon = region.center.longitude - region.span.longitudeDelta / 2
+            let maxLon = region.center.longitude + region.span.longitudeDelta / 2
+            
+            return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
+        }
+    }
     
     var body: some View {
         ZStack {
@@ -192,8 +460,33 @@ struct ExpandedMapView: View {
                     RoutePolyline(
                         points: drive.pointsChronological,
                         mode: showSpeedHeatMap ? .heatMap : .solid,
-                        lineWidth: 6
+                        lineWidth: 8
                     )
+                }
+                
+                // Acceleration event markers
+                if showEvents && showAccelerationEvents {
+                    ForEach(drive.accelerationEvents, id: \.id) { event in
+                        Annotation(event.eventType.displayName, coordinate: event.coordinate) {
+                            AccelerationEventMarker(event: event, size: .large)
+                        }
+                    }
+                }
+                
+                // Saved places (only those relevant to this drive)
+                ForEach(relevantPlaces) { place in
+                    MapCircle(center: place.coordinate, radius: place.radiusMeters)
+                        .foregroundStyle(.orange.opacity(0.15))
+                        .stroke(.orange, lineWidth: 2)
+                    
+                    Annotation(place.name, coordinate: place.coordinate) {
+                        Image(systemName: place.icon)
+                            .font(.caption)
+                            .foregroundStyle(.white)
+                            .padding(6)
+                            .background(Circle().fill(.orange))
+                            .shadow(radius: 2)
+                    }
                 }
                 
                 // Start marker
@@ -243,6 +536,13 @@ struct ExpandedMapView: View {
                         Text("•")
                             .foregroundStyle(.secondary)
                         Text(drive.formattedDuration)
+                        if !drive.accelerationEvents.isEmpty {
+                            Text("•")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("\(drive.accelerationEvents.count)")
+                        }
                     }
                     .font(.subheadline)
                     .fontWeight(.medium)
@@ -272,6 +572,20 @@ struct ExpandedMapView: View {
                 
                 // Bottom controls
                 HStack {
+                    // Event toggle
+                    if showAccelerationEvents && !drive.accelerationEvents.isEmpty {
+                        Button {
+                            showEvents.toggle()
+                        } label: {
+                            Image(systemName: showEvents ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
+                                .font(.headline)
+                                .foregroundStyle(showEvents ? .orange : .primary)
+                                .padding(12)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Circle())
+                        }
+                    }
+                    
                     Spacer()
                     
                     // Recenter button
@@ -291,6 +605,7 @@ struct ExpandedMapView: View {
             }
         }
         .onAppear {
+            showEvents = showAccelerationEvents
             setupCamera()
         }
     }
@@ -352,6 +667,87 @@ struct DetailRow: View {
             Text(value)
                 .fontWeight(.medium)
         }
+    }
+}
+
+// MARK: - Acceleration Event Marker
+
+struct AccelerationEventMarker: View {
+    let event: AccelerationEvent
+    let size: MarkerSize
+    
+    enum MarkerSize {
+        case small, regular, large
+        
+        var iconFont: Font {
+            switch self {
+            case .small: return .caption
+            case .regular: return .body
+            case .large: return .title2
+            }
+        }
+        
+        var padding: CGFloat {
+            switch self {
+            case .small: return 4
+            case .regular: return 6
+            case .large: return 8
+            }
+        }
+    }
+    
+    private var color: Color {
+        switch event.eventType {
+        case .hardBrake: return .red
+        case .hardAcceleration: return .orange
+        case .hardCornerLeft, .hardCornerRight: return .yellow
+        }
+    }
+    
+    private var icon: String {
+        switch event.eventType {
+        case .hardBrake: return "arrow.down.circle.fill"
+        case .hardAcceleration: return "arrow.up.circle.fill"
+        case .hardCornerLeft: return "arrow.turn.up.left"
+        case .hardCornerRight: return "arrow.turn.up.right"
+        }
+    }
+    
+    var body: some View {
+        Image(systemName: icon)
+            .font(size.iconFont)
+            .foregroundStyle(color)
+            .padding(size.padding)
+            .background(Circle().fill(.white))
+            .shadow(color: color.opacity(0.3), radius: 2, x: 0, y: 1)
+    }
+}
+
+// MARK: - Event Count Badge
+
+struct EventCountBadge: View {
+    let count: Int?
+    let label: String
+    var value: String? = nil
+    let color: Color
+    let icon: String
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(color)
+            
+            Text(value ?? "\(count ?? 0)")
+                .font(.title3)
+                .fontWeight(.bold)
+                .monospacedDigit()
+            
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

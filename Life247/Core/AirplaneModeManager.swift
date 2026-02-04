@@ -20,6 +20,10 @@ final class AirplaneModeManager: ObservableObject {
     /// Callback triggered when Airplane Mode is disabled (ON → OFF)
     /// Used by DriveStateMachine to reconcile stale state
     var onDisable: (() -> Void)?
+
+    /// Callback triggered when Airplane Mode is enabled (OFF → ON)
+    /// Used by Life247App to stop monitoring
+    var onEnable: (() -> Void)?
     
     /// Internal backing storage
     @AppStorage("airplaneModeEnabled") private var _isEnabled: Bool = false
@@ -34,9 +38,13 @@ final class AirplaneModeManager: ObservableObject {
             
             if newValue {
                 logger.info("[AIRPLANE] Enabled")
+                // Trigger suspend hooks when transitioning ON
+                if !wasEnabled {
+                    logger.info("[AIRPLANE] Triggering suspend hooks")
+                    onEnable?()
+                }
             } else {
                 logger.info("[AIRPLANE] Disabled")
-                
                 // Trigger reconciliation when transitioning OFF
                 if wasEnabled {
                     logger.info("[AIRPLANE] Triggering state reconciliation")

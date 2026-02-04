@@ -17,9 +17,35 @@ struct DriveDetectionSettingsView: View {
     private let stoppedDetectionPresets: [Double] = [15, 30, 60, 90]
     private let autoEndPresets: [Int] = [3, 5, 10, 15]
     private let confirmationPresets: [Double] = [5, 10, 15, 20]
+    private let verificationTimeoutPresets: [Double] = [15, 30, 60, 90]
     
     var body: some View {
         List {
+            // Verification Timeout (maybeDriving window)
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "timer")
+                            .foregroundStyle(.blue)
+                        Text("Verification Window")
+                            .fontWeight(.medium)
+                        Spacer()
+                        Text("\(Int(settings.verificationTimeout))s")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    
+                    Picker("", selection: $settings.verificationTimeout) {
+                        ForEach(verificationTimeoutPresets, id: \.self) { value in
+                            Text("\(Int(value))s").tag(value)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            } footer: {
+                Text("Maximum time to verify a drive before giving up")
+            }
+            
             // Stopped Detection
             Section {
                 VStack(alignment: .leading, spacing: 12) {
@@ -102,7 +128,7 @@ struct DriveDetectionSettingsView: View {
                 }
             }
         }
-        .contentMargins(.bottom, 100, for: .scrollContent)
+        .bottomBarPadding()
         .navigationTitle("Drive Detection")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(

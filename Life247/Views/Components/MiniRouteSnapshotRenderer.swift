@@ -14,6 +14,31 @@ import Combine
 final class MiniRouteSnapshotRenderer: ObservableObject {
     private var task: Task<UIImage?, Never>?
 
+    private static let imageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        // Tune for smooth scrolling; snapshots are relatively large.
+        cache.countLimit = 250
+        cache.totalCostLimit = 80 * 1024 * 1024 // ~80MB
+        return cache
+    }()
+
+    private static func cacheKey(
+        driveId: UUID,
+        size: CGSize,
+        scale: CGFloat
+    ) -> NSString {
+        let w = Int(size.width.rounded(.toNearestOrAwayFromZero))
+        let h = Int(size.height.rounded(.toNearestOrAwayFromZero))
+        let s = Int((scale * 100).rounded(.toNearestOrAwayFromZero))
+        return NSString(string: "drive:\(driveId.uuidString)|\(w)x\(h)@\(s)|muted")
+    }
+
+    private static func imageCost(_ image: UIImage) -> Int {
+        guard let cgImage = image.cgImage else { return 1 }
+        // Rough bytes = bytesPerRow * height
+        return cgImage.bytesPerRow * cgImage.height
+    }
+
     @MainActor
     func cancel() {
         task?.cancel()
@@ -29,6 +54,11 @@ final class MiniRouteSnapshotRenderer: ObservableObject {
         cancel()
 
         guard let bounds = drive.routeBounds else { return nil }
+
+        let key = Self.cacheKey(driveId: drive.id, size: size, scale: scale)
+        if let cached = Self.imageCache.object(forKey: key) {
+            return cached
+        }
         
         // Add padding so routes aren't clipped at edges
         let paddedSpan = MKCoordinateSpan(
@@ -44,16 +74,22 @@ final class MiniRouteSnapshotRenderer: ObservableObject {
             )
             options.size = size
             options.scale = scale
-            options.mapType = .standard
+            options.mapType = .hybrid
             options.showsBuildings = false
             options.pointOfInterestFilter = .excludingAll
+            options.traitCollection = UITraitCollection(traitsFrom: [
+                UITraitCollection(userInterfaceStyle: .dark),
+                UITraitCollection(displayScale: scale)
+            ])
 
             let snapshotter = MKMapSnapshotter(options: options)
 
             return await withTaskCancellationHandler {
                 do {
                     let snapshot = try await snapshotter.start()
-                    return Self.drawRoute(on: snapshot, drive: drive)
+                    let image = Self.drawRoute(on: snapshot, drive: drive)
+                    Self.imageCache.setObject(image, forKey: key, cost: Self.imageCost(image))
+                    return image
                 } catch {
                     return nil
                 }

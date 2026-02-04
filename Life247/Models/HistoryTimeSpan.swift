@@ -8,12 +8,12 @@
 import Foundation
 
 /// Time span options for history overlay on the map.
-enum HistoryTimeSpan: CaseIterable {
-    case off
-    case oneHour
-    case sixHours
-    case twelveHours
-    case twentyFourHours
+enum HistoryTimeSpan: String, CaseIterable {
+    case off = "off"
+    case oneHour = "1h"
+    case sixHours = "6h"
+    case twelveHours = "12h"
+    case twentyFourHours = "24h"
     
     var label: String {
         switch self {
