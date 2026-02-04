@@ -58,3 +58,14 @@ Carthage/Build/
 # Secrets.swift
 # *.p12
 # *.mobileprovision
+
+# =================
+# Local Docs / Artifacts
+# =================
+server/
+screenshots/
+CodebaseCritique.md
+CodebaseStructure.md
+ProjectOverview.md
+file_structure.txt
+MyPlan.md
