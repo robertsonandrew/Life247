@@ -349,7 +349,8 @@ struct DashboardView: View {
                 handleLocationChange(newLocation)
             }
             .onChange(of: stateMachine.state) { oldState, newState in
-                guard isVisible else { return }
+                // Keep tracking-mode transitions in sync even when map tab is hidden.
+                // Camera writes remain visibility-gated inside updateCamera/updateCameraFromLocation.
                 handleDriveStateChange(from: oldState, to: newState)
             }
             .onChange(of: trackingMode) { _, newMode in
@@ -813,6 +814,12 @@ struct DashboardView: View {
             // Auto-rotate map when driving (if user hasn't panned away)
             if trackingMode == .follow {
                 trackingMode = .followWithHeading
+                if let location = stateMachine.currentLocation {
+                    updateCamera(for: location)
+                }
+            } else if trackingMode == .free {
+                // Enter driving camera automatically when a drive begins from free mode.
+                trackingMode = .drivingView
                 if let location = stateMachine.currentLocation {
                     updateCamera(for: location)
                 }

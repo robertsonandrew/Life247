@@ -168,13 +168,11 @@ struct SettingsView: View {
         return "\(version) (\(build))"
     }
 
-    private var gitCommitDisplay: String? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: "GitCommitHash") as? String else {
-            return nil
-        }
+    private var gitCommitDisplay: String {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "GitCommitHash") as? String ?? "unknown"
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, value.lowercased() != "unknown" else {
-            return nil
+        if value.isEmpty {
+            return "unknown"
         }
         return value
     }
@@ -269,10 +267,8 @@ struct SettingsView: View {
                     SettingsSectionHeader(title: "About")
                     
                     SettingsValueRow(title: "Version", value: appVersionDisplay)
-                    if let gitCommitDisplay {
-                        SettingsDivider()
-                        SettingsValueRow(title: "Git", value: gitCommitDisplay)
-                    }
+                    SettingsDivider()
+                    SettingsValueRow(title: "Git", value: gitCommitDisplay)
                     
                     Spacer(minLength: 100)
                 }
