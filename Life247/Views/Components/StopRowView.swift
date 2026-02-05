@@ -137,7 +137,8 @@ struct StopRowView: View {
             startTime: Date().addingTimeInterval(-3600),
             endTime: Date().addingTimeInterval(-3000),
             matchedPlace: nil,
-            address: "Dollar General"
+            address: "Dollar General",
+            source: .betweenDrives
         ))
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         .listRowSeparator(.hidden)
@@ -149,7 +150,8 @@ struct StopRowView: View {
                 startTime: Date().addingTimeInterval(-7200),
                 endTime: Date().addingTimeInterval(-3600),
                 matchedPlace: nil,
-                address: "Home"
+                address: "Home",
+                source: .betweenDrives
             ),
             frequentStopInfo: FrequentStopCandidate(
                 coordinate: .init(latitude: 36.0, longitude: -95.9),

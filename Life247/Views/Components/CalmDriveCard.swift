@@ -63,14 +63,17 @@ struct CalmDriveCard: View {
             // Direct Sheet Navigation
             onViewDetails?()
         }
-        .onTapGesture(count: 5) {
-            onInspector?()
-        }
         .contextMenu {
             Button {
                 onShare?()
             } label: {
                 Label("Share Drive", systemImage: "square.and.arrow.up")
+            }
+            
+            Button {
+                onInspector?()
+            } label: {
+                Label("Debug View", systemImage: "wrench.and.screwdriver")
             }
             
             Button {

@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  life247-api:
+    build: .
+    container_name: life247-sync
+    ports:
+      - "8247:8000"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - LIFE247_API_KEY=${LIFE247_API_KEY:?LIFE247_API_KEY must be set in server/.env}
+    restart: unless-stopped

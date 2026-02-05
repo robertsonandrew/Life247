@@ -60,15 +60,21 @@ enum TimelineItem: Identifiable {
     }
 }
 
-/// An inferred stop between two drives.
+/// An inferred stop, either between drives or inside a drive gap.
 /// Ephemeral - computed at runtime, not persisted.
 struct InferredStop: Identifiable {
+    enum Source: String {
+        case betweenDrives
+        case inDriveGap
+    }
+
     let id: UUID
     let location: CLLocationCoordinate2D
-    let startTime: Date       // Previous drive's endTime
-    let endTime: Date         // Next drive's startTime
+    let startTime: Date
+    let endTime: Date
     let matchedPlace: Place?  // If within a Place's radius
     let address: String?      // Fallback from geocoding
+    let source: Source
     
     /// Duration of the stop
     var duration: TimeInterval {

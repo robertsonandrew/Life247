@@ -47,6 +47,8 @@ final class Drive {
     var maxGapBetweenSamples: TimeInterval = 0
     var locationPauseCount: Int = 0
     var bufferedPointCount: Int = 0  // Points captured during maybeDriving and promoted on drive start
+    var distanceGapSkipCount: Int = 0
+    var distanceGapSkippedMeters: Double = 0
     
     // MARK: - Sync Status
     var syncedAt: Date?              // When successfully uploaded
@@ -194,12 +196,12 @@ final class Drive {
     
     /// Start coordinate for map display
     var startCoordinate: CLLocationCoordinate2D? {
-        points.first?.coordinate
+        pointsChronological.first?.coordinate
     }
     
     /// End coordinate for map display
     var endCoordinate: CLLocationCoordinate2D? {
-        points.last?.coordinate
+        latestPointForProcessing()?.coordinate
     }
 
     /// End coordinate snapshot captured at drive end (may differ from last point)
@@ -255,6 +257,10 @@ final class Drive {
     private var _cachedSortedPoints: [LocationPoint]?
     @Transient
     private var _cachedPointsCount: Int = -1
+    @Transient
+    private var _cachedLatestPoint: LocationPoint?
+    @Transient
+    private var _cachedLatestPointCount: Int = -1
     
     /// Points in chronological order (SwiftData relationships don't preserve insertion order)
     /// Uses latitude as tie-breaker for stable ordering when timestamps are equal
@@ -262,6 +268,8 @@ final class Drive {
     func invalidatePointsCache() {
         _cachedSortedPoints = nil
         _cachedPointsCount = -1
+        _cachedLatestPoint = nil
+        _cachedLatestPointCount = -1
     }
     
     /// Points in chronological order (SwiftData relationships don't preserve insertion order)
@@ -286,6 +294,46 @@ final class Drive {
         _cachedSortedPoints = sorted
         _cachedPointsCount = points.count
         return sorted
+    }
+
+    /// Timestamp of the most recent accepted point (order-safe for unordered relationships).
+    var latestPointTimestamp: Date? {
+        latestPointForProcessing()?.timestamp
+    }
+
+    private func latestPointForProcessing() -> LocationPoint? {
+        guard !points.isEmpty else {
+            _cachedLatestPoint = nil
+            _cachedLatestPointCount = 0
+            return nil
+        }
+
+        if _cachedLatestPointCount == points.count, let cached = _cachedLatestPoint {
+            return cached
+        }
+
+        let latest = points.max { lhs, rhs in
+            if lhs.timestamp == rhs.timestamp {
+                return lhs.latitude < rhs.latitude
+            }
+            return lhs.timestamp < rhs.timestamp
+        }
+
+        _cachedLatestPoint = latest
+        _cachedLatestPointCount = points.count
+        return latest
+    }
+
+    private func updateLatestPointCache(with point: LocationPoint) {
+        if let current = _cachedLatestPoint {
+            if point.timestamp > current.timestamp ||
+                (point.timestamp == current.timestamp && point.latitude >= current.latitude) {
+                _cachedLatestPoint = point
+            }
+        } else {
+            _cachedLatestPoint = point
+        }
+        _cachedLatestPointCount = points.count
     }
     
     /// Precomputed route bounds for efficient camera fitting
@@ -336,6 +384,10 @@ final class Drive {
     /// Maximum distance jump between consecutive points (meters) - helps filter teleports
     private static let maxDistanceJump: Double = 500.0
     
+    /// Don't accumulate distance across very large sample gaps (seconds)
+    /// Prevents inflated totals when iOS batches sparse background updates.
+    private static let maxGapForDistanceAccumulation: TimeInterval = 90
+    
     /// Reason why a location point was rejected
     enum PointRejectionReason: String {
         case poorAccuracy = "accuracy"
@@ -343,6 +395,11 @@ final class Drive {
         case speedTooHigh = "speed_spike"
         case timeDeltaInvalid = "time_delta"
         case teleportation = "teleport"
+    }
+
+    /// Non-fatal handling details for accepted points
+    enum PointAcceptanceNote {
+        case distanceSkippedLargeGap(gapSeconds: TimeInterval, skippedMeters: Double)
     }
     
     /// Add a location point if it passes quality filters
@@ -353,23 +410,25 @@ final class Drive {
     }
     
     /// Add a location point if it passes quality filters
-    /// Returns (success, rejectionReason) - reason is nil if accepted
-    func addPointWithReason(_ location: CLLocation) -> (Bool, PointRejectionReason?) {
+    /// Returns (success, rejectionReason, acceptanceNote)
+    /// - rejectionReason is nil if accepted
+    /// - acceptanceNote provides additional context for accepted points
+    func addPointWithReason(_ location: CLLocation) -> (Bool, PointRejectionReason?, PointAcceptanceNote?) {
         // Filter 1: Reject poor accuracy readings
         guard location.horizontalAccuracy > 0 && location.horizontalAccuracy <= Self.maxAccuracy else {
-            return (false, .poorAccuracy)
+            return (false, .poorAccuracy, nil)
         }
 
         // Filter 2: Reject impossibly high speeds (GPS spike) when speed is reported.
         // Note: CLLocation.speed may be -1 (invalid), especially during background samples.
         if location.speed >= 0 {
             guard location.speed <= Self.maxReasonableSpeed else {
-                return (false, .speedTooHigh)
+                return (false, .speedTooHigh, nil)
             }
         }
         
         // Filter 4: If we have previous points, check for impossible jumps
-        if let lastPoint = points.last {
+        if let lastPoint = latestPointForProcessing() {
             let lastLocation = CLLocation(
                 latitude: lastPoint.latitude,
                 longitude: lastPoint.longitude
@@ -379,7 +438,22 @@ final class Drive {
             
             // Reject if time went backwards or is stale
             guard timeDelta > 0 else {
-                return (false, .timeDeltaInvalid)
+                return (false, .timeDeltaInvalid, nil)
+            }
+
+            // Very large gaps are treated as unknown movement windows.
+            // Keep the point for route continuity, but skip distance accumulation.
+            if timeDelta > Self.maxGapForDistanceAccumulation {
+                let impliedSpeed = distance / timeDelta
+                if impliedSpeed > Self.maxReasonableSpeed {
+                    return (false, .teleportation, nil)
+                }
+                let newPoint = LocationPoint(from: location)
+                points.append(newPoint)
+                updateLatestPointCache(with: newPoint)
+                distanceGapSkipCount += 1
+                distanceGapSkippedMeters += distance
+                return (true, nil, .distanceSkippedLargeGap(gapSeconds: timeDelta, skippedMeters: distance))
             }
             
             // Reject teleportation (jumped too far too fast)
@@ -387,7 +461,7 @@ final class Drive {
                 // Check if implied speed is reasonable
                 let impliedSpeed = distance / timeDelta
                 if impliedSpeed > Self.maxReasonableSpeed {
-                    return (false, .teleportation)
+                    return (false, .teleportation, nil)
                 }
                 // Large gap but plausible speed (GPS gap) — accept and count distance
                 distanceMeters += distance
@@ -400,7 +474,8 @@ final class Drive {
         // Point passed all filters - add it
         let newPoint = LocationPoint(from: location)
         points.append(newPoint)
-        return (true, nil)
+        updateLatestPointCache(with: newPoint)
+        return (true, nil, nil)
     }
     
     /// Finalize the drive with an end time and optional reason

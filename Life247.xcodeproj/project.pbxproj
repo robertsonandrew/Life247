@@ -68,6 +68,7 @@
 				03E2C54B2F180A9300F14ACC /* Sources */,
 				03E2C54C2F180A9300F14ACC /* Frameworks */,
 				03E2C54D2F180A9300F14ACC /* Resources */,
+				03E2C5D02F18116B00F14ACC /* Embed Git Commit */,
 			);
 			buildRules = (
 			);
@@ -127,6 +128,24 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		03E2C5D02F18116B00F14ACC /* Embed Git Commit */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Git Commit";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nINFO_PLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nGIT_HASH=\"${CI_COMMIT_SHA:-${GITHUB_SHA:-${BUILD_VCS_NUMBER:-}}}\"\nif [ -z \"$GIT_HASH\" ]; then\n  if GIT_FROM_REPO=$(git -C \"${SRCROOT}\" rev-parse HEAD 2>/dev/null); then\n    GIT_HASH=\"$GIT_FROM_REPO\"\n  fi\nfi\nif [ -n \"$GIT_HASH\" ]; then\n  GIT_HASH=$(printf \"%s\" \"$GIT_HASH\" | cut -c1-8)\nelse\n  GIT_HASH=\"unknown\"\nfi\n/usr/libexec/PlistBuddy -c \"Set :GitCommitHash $GIT_HASH\" \"$INFO_PLIST\" 2>/dev/null \\\n  || /usr/libexec/PlistBuddy -c \"Add :GitCommitHash string $GIT_HASH\" \"$INFO_PLIST\"\necho \"Embedded GitCommitHash=$GIT_HASH\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		03E2C54B2F180A9300F14ACC /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -176,7 +195,7 @@
 				DEVELOPMENT_TEAM = 5LG8X46PQ2;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -240,7 +259,7 @@
 				DEVELOPMENT_TEAM = 5LG8X46PQ2;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;

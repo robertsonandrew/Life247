@@ -6,6 +6,36 @@
 //
 
 import SwiftUI
+import Foundation
+
+enum BottomBarDetent: CGFloat, CaseIterable {
+    case peek = 56       // Collapsed - just status
+    case medium = 160    // Mid-height - summary content
+    case full = 280      // Fully expanded - all details
+    
+    var next: BottomBarDetent {
+        switch self {
+        case .peek: return .medium
+        case .medium: return .full
+        case .full: return .peek
+        }
+    }
+}
+
+struct HistoryRouteSelection: Identifiable, Equatable {
+    let id: UUID
+    let title: String
+    let timeRangeText: String
+    let distanceMiles: Double
+    let duration: TimeInterval
+    let avgSpeedMPH: Double
+    let maxSpeedMPH: Double
+    let gForceCounts: [AccelerationEventType: Int]
+    
+    var totalGForceEvents: Int {
+        gForceCounts.values.reduce(0, +)
+    }
+}
 
 /// Unified bottom bar combining DriveSheet and TabBar.
 /// Height-based bottom sheet (Apple Maps–style) with velocity-based snapping.
@@ -26,24 +56,10 @@ struct BottomBar: View {
     // Only show drive sheet on Map tab
     let showDriveSheet: Bool
     
-    // MARK: - Sheet Detents
-    private enum SheetDetent: CGFloat, CaseIterable {
-        case peek = 56       // Collapsed - just status
-        case medium = 160    // Mid-height - summary content
-        case full = 280      // Fully expanded - all details
-        
-        var next: SheetDetent {
-            switch self {
-            case .peek: return .medium
-            case .medium: return .full
-            case .full: return .peek
-            }
-        }
-    }
-    
     // MARK: - Sheet State
-    @State private var currentDetent: SheetDetent = .peek
+    @Binding var currentDetent: BottomBarDetent
     @GestureState private var dragOffset: CGFloat = 0
+    let selectedHistoryRoute: HistoryRouteSelection?
     
     // MARK: - Layout Constants
     private let tabBarHeight: CGFloat = 56
@@ -101,6 +117,7 @@ struct BottomBar: View {
     private var driveSheet: some View {
         VStack(spacing: 0) {
             dragHandle
+                .gesture(dragGesture)
             
             ZStack(alignment: .top) {
                 // Peek content fades out as we expand
@@ -144,7 +161,7 @@ struct BottomBar: View {
             .stroke(Color.white.opacity(0.10), lineWidth: 1)
         }
         .contentShape(Rectangle())
-        .highPriorityGesture(dragGesture)
+        //.highPriorityGesture(dragGesture) // REMOVED as per instructions
         .onTapGesture {
             cycleDetent()
         }
@@ -190,7 +207,7 @@ struct BottomBar: View {
             }
         }
         .padding(.horizontal, 24)
-        .frame(height: SheetDetent.peek.rawValue - handleHeight)
+        .frame(height: BottomBarDetent.peek.rawValue - handleHeight)
     }
     
     // MARK: - Expanded Content
@@ -220,6 +237,8 @@ struct BottomBar: View {
                     }
                 }
                 .padding(.horizontal, 24)
+            } else if let selection = selectedHistoryRoute {
+                routeDetailsContent(selection)
             } else {
                 peekContent
             }
@@ -261,8 +280,8 @@ struct BottomBar: View {
         let rawHeight = baseHeight + dragOffset
         
         // Rubber-band effect: allow over-drag with resistance
-        let minHeight = SheetDetent.peek.rawValue
-        let maxHeight = SheetDetent.full.rawValue
+        let minHeight = BottomBarDetent.peek.rawValue
+        let maxHeight = BottomBarDetent.full.rawValue
         
         if rawHeight < minHeight {
             let overDrag = minHeight - rawHeight
@@ -276,8 +295,8 @@ struct BottomBar: View {
     
     private var expandProgress: CGFloat {
         // 0 at peek, 0.5 at medium, 1 at full
-        let minH = SheetDetent.peek.rawValue
-        let maxH = SheetDetent.full.rawValue
+        let minH = BottomBarDetent.peek.rawValue
+        let maxH = BottomBarDetent.full.rawValue
         return (computedHeight - minH) / (maxH - minH)
     }
     
@@ -291,7 +310,7 @@ struct BottomBar: View {
     }
     
     private func snapToNearestDetent(velocity: CGFloat, currentHeight: CGFloat) {
-        let detents = SheetDetent.allCases.map { $0.rawValue }.sorted()
+        let detents = BottomBarDetent.allCases.map { $0.rawValue }.sorted()
         
         // Find nearest detent, biased by velocity
         var targetHeight = currentHeight
@@ -301,8 +320,8 @@ struct BottomBar: View {
         }
         
         // Snap to closest detent
-        let nearest = detents.min(by: { abs($0 - targetHeight) < abs($1 - targetHeight) }) ?? SheetDetent.peek.rawValue
-        let newDetent = SheetDetent.allCases.first { $0.rawValue == nearest } ?? .peek
+        let nearest = detents.min(by: { abs($0 - targetHeight) < abs($1 - targetHeight) }) ?? BottomBarDetent.peek.rawValue
+        let newDetent = BottomBarDetent.allCases.first { $0.rawValue == nearest } ?? .peek
         
         // Haptic feedback
         let generator = UIImpactFeedbackGenerator(style: .light)
@@ -388,6 +407,10 @@ struct BottomBar: View {
     }
     
     private var formattedDuration: String {
+        formatDuration(duration)
+    }
+    
+    private func formatDuration(_ duration: TimeInterval) -> String {
         let hours = Int(duration) / 3600
         let minutes = (Int(duration) % 3600) / 60
         let seconds = Int(duration) % 60
@@ -397,6 +420,65 @@ struct BottomBar: View {
         }
         return String(format: "%d:%02d", minutes, seconds)
     }
+    
+    private func routeDetailsContent(_ selection: HistoryRouteSelection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(selection.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                
+                Text(selection.timeRangeText)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .monospacedDigit()
+            }
+            
+            HStack(spacing: 0) {
+                metricItem(value: String(format: "%.1f", selection.distanceMiles), unit: "mi", label: "Distance")
+                divider
+                metricItem(value: formatDuration(selection.duration), unit: nil, label: "Duration")
+                divider
+                metricItem(value: String(format: "%.0f", selection.maxSpeedMPH), unit: "mph", label: "Max")
+            }
+            
+            HStack(spacing: 16) {
+                statItem(label: "Avg", value: String(format: "%.0f mph", selection.avgSpeedMPH))
+                statItem(label: "Events", value: "\(selection.totalGForceEvents)")
+                
+                if selection.totalGForceEvents > 0 {
+                    Spacer()
+                    gForceSummaryChips(selection)
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+    }
+    
+    private func gForceSummaryChips(_ selection: HistoryRouteSelection) -> some View {
+        HStack(spacing: 8) {
+            ForEach(AccelerationEventType.allCases, id: \.self) { eventType in
+                let count = selection.gForceCounts[eventType, default: 0]
+                if count > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: eventType.sfSymbol)
+                            .font(.caption2)
+                        Text("\(count)")
+                            .font(.caption2)
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.12))
+                    )
+                }
+            }
+        }
+    }
 }
 
 private extension Comparable {
@@ -404,3 +486,4 @@ private extension Comparable {
         return min(max(self, limits.lowerBound), limits.upperBound)
     }
 }
+

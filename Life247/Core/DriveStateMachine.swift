@@ -47,6 +47,13 @@ final class DriveStateMachine {
     /// Speed threshold to resume from stopped (mph)
     private let resumeSpeedThreshold: Double = 5.0
 
+    /// Minimum speed to resume when recent on-foot evidence exists (mph).
+    /// Prevents walking/noise from bouncing stopped → driving.
+    private let resumeSpeedThresholdOnFootRecent: Double = 8.0
+
+    /// Sustained speed required before resuming from stopped (seconds).
+    private let stoppedResumeSustainDuration: TimeInterval = 6.0
+
     /// Speed threshold to treat geofence entry as immediate arrival (mph)
     private let geofenceImmediateEndSpeedMPH: Double = 15.0
 
@@ -195,6 +202,7 @@ final class DriveStateMachine {
     
     // Stopped state tracking (for Issue #1 fix)
     private var stoppedSince: Date?
+    private var stoppedResumeCandidateStart: Date?
 
     // On-foot tracking for stop candidate logic
     private var lastOnFootAt: Date?
@@ -363,6 +371,16 @@ final class DriveStateMachine {
         // Save drive data immediately when entering background to minimize loss on termination
         if state == "background" {
             saveActiveDriveIfNeeded()
+
+            // Avoid sticky background GPS indicator after a drive has ended.
+            // In background, post-drive grace cannot be relied on (app suspension),
+            // so end it immediately if we're already in `.ended`.
+            if self.state == .ended && isPostDriveMonitoring {
+                endPostDriveMonitoring(trigger: "app_backgrounded")
+            }
+        } else if state == "active" {
+            // Reconcile grace deadlines after returning from suspension.
+            updatePostDriveMonitoringIfNeeded()
         }
     }
     
@@ -457,30 +475,24 @@ final class DriveStateMachine {
             return
         }
         
-        // Check speed if available
-        let speed = lastLocation?.speed ?? -1
-        let speedMPH = speed >= 0 ? speed * msToMPH : -1
+        // Check speed if available and fresh; avoid false starts from stale or low speed
+        let rawSpeed = lastLocation?.speed ?? -1
+        let speedAgeSeconds = lastLocation.map { Date().timeIntervalSince($0.timestamp) } ?? .greatestFiniteMagnitude
+        let speedIsFresh = speedAgeSeconds <= idleStartLocationMaxAgeSeconds
+        let speedValid = rawSpeed >= 0 && speedIsFresh
+        let speedMPH = speedValid ? rawSpeed * msToMPH : -1
         
-        if speed >= coldStartSpeedThreshold {
-            // Motion + Speed confirmed → go directly to driving
-            logger.info("[RECOVERY] Motion=YES, Speed=\(String(format: "%.1f", speedMPH))mph → entering DRIVING")
-            
-            // Skip maybeDriving - go directly to driving via special transition
+        if speedValid && rawSpeed >= coldStartSpeedThreshold {
+            // Motion + fresh high speed → go directly to driving
+            logger.info("[RECOVERY] Motion=YES, Fresh speed=\(String(format: "%.1f", speedMPH))mph → entering DRIVING")
             pendingStartReason = .coldStartRecovery
             transitionDirectToDriving(trigger: "cold_start_high_speed")
-            
-        } else if speed >= 0 && speed < coldStartSpeedThreshold {
-            // Motion suggests driving but speed is low - maybe stopped at light
-            logger.info("[RECOVERY] Motion=YES, Speed=\(String(format: "%.1f", speedMPH))mph (low) → entering DRIVING (may be stopped)")
-            
-            // Still enter driving - user was likely driving recently
-            pendingStartReason = .coldStartRecovery
-            transitionDirectToDriving(trigger: "cold_start_low_speed")
-            
         } else {
-            // Motion suggests driving but no speed data
-            logger.info("[RECOVERY] Motion=YES, Speed=unknown → entering MAYBEDRIVING")
-            transition(to: .maybeDriving, trigger: "cold_start_speed_unknown")
+            // Motion suggests driving but speed is stale/low/unknown → stay IDLE and corroborate via one-shot GPS
+            let speedLabel = speedValid ? String(format: "%.1f", speedMPH) : "unknown"
+            logger.info("[RECOVERY] Motion=YES, Speed=\(speedLabel)mph (stale/low) → staying IDLE and requesting one-shot GPS")
+            requestOneShotGPSIfNeeded(reason: "cold_start_motion")
+            return
         }
     }
     
@@ -833,13 +845,16 @@ final class DriveStateMachine {
             }
             
             // Check for GPS gaps
-            trackGPSGapIfNeeded(from: activeDrive?.points.last?.timestamp, to: location.timestamp)
+            trackGPSGapIfNeeded(from: activeDrive?.latestPointTimestamp, to: location.timestamp)
             
             // Record location point with rejection logging
             if let drive = activeDrive {
-                let (added, reason) = drive.addPointWithReason(location)
+                let (added, reason, note) = drive.addPointWithReason(location)
                 if added {
                     drive.locationSampleCount += 1
+                    if let note {
+                        logPointAcceptanceNote(note)
+                    }
                     periodicallySaveIfNeeded()
                 } else if let reason {
                     drive.droppedSampleCount += 1
@@ -923,13 +938,16 @@ final class DriveStateMachine {
             
         case .stopped:
             // Track GPS gaps
-            trackGPSGapIfNeeded(from: activeDrive?.points.last?.timestamp, to: location.timestamp)
+            trackGPSGapIfNeeded(from: activeDrive?.latestPointTimestamp, to: location.timestamp)
             
             // Record location point with rejection logging
             if let drive = activeDrive {
-                let (added, reason) = drive.addPointWithReason(location)
+                let (added, reason, note) = drive.addPointWithReason(location)
                 if added {
                     drive.locationSampleCount += 1
+                    if let note {
+                        logPointAcceptanceNote(note)
+                    }
                     periodicallySaveIfNeeded()
                 } else if let reason {
                     drive.droppedSampleCount += 1
@@ -975,9 +993,25 @@ final class DriveStateMachine {
                 return
             }
             
-            // Check for resume
-            if speedMPH >= resumeSpeedThreshold {
-                transition(to: .driving, trigger: "resume_speed")
+            // Check for resume (debounced to avoid walk/noise bounce-backs).
+            let now = Date()
+            let onFootRecent = isOnFootRecent(now)
+            let requiredResumeSpeed = onFootRecent
+                ? max(resumeSpeedThreshold, resumeSpeedThresholdOnFootRecent)
+                : resumeSpeedThreshold
+
+            if speedMPH >= requiredResumeSpeed {
+                if stoppedResumeCandidateStart == nil {
+                    stoppedResumeCandidateStart = now
+                } else if now.timeIntervalSince(stoppedResumeCandidateStart!) >= stoppedResumeSustainDuration {
+                    transition(
+                        to: .driving,
+                        trigger: onFootRecent ? "resume_speed_sustained_on_foot" : "resume_speed_sustained"
+                    )
+                    return
+                }
+            } else {
+                stoppedResumeCandidateStart = nil
             }
             
         case .ended:
@@ -1016,7 +1050,37 @@ final class DriveStateMachine {
         
         // Log gaps longer than 60 seconds (shorter gaps are normal iOS background behavior)
         if gap > 60 {
-            driveLogger.logGPSGap(gapDuration: gap)
+            driveLogger.log(
+                .anomaly,
+                type: "gps_gap",
+                message: "GPS gap detected: \(String(format: "%.0f", gap))s",
+                metadata: [
+                    "gapSeconds": String(format: "%.1f", gap),
+                    "state": state.rawValue,
+                    "appState": UIApplication.shared.applicationState == .background ? "background" : "foreground",
+                    "highAccuracy": String(locationManager?.isHighAccuracyMode ?? false)
+                ]
+            )
+
+            if let drive = activeDrive, gap > drive.maxGapBetweenSamples {
+                drive.maxGapBetweenSamples = gap
+            }
+        }
+    }
+
+    /// Log non-fatal handling notes for accepted points.
+    private func logPointAcceptanceNote(_ note: Drive.PointAcceptanceNote) {
+        switch note {
+        case .distanceSkippedLargeGap(let gapSeconds, let skippedMeters):
+            driveLogger.log(
+                .anomaly,
+                type: "distance_gap_skipped",
+                message: "Skipped distance across large gap (\(Int(gapSeconds))s)",
+                metadata: [
+                    "gapSeconds": String(format: "%.1f", gapSeconds),
+                    "skippedMeters": String(format: "%.1f", skippedMeters)
+                ]
+            )
         }
     }
     
@@ -1507,6 +1571,7 @@ final class DriveStateMachine {
             stoppedTimer?.cancel()
             stoppedTimer = nil
             stoppedSince = nil
+            stoppedResumeCandidateStart = nil
             // Clear persisted stoppedSince when resuming (MUST be durable)
             if let drive = activeDrive {
                 drive.stoppedSince = nil
@@ -1520,6 +1585,7 @@ final class DriveStateMachine {
         case .driving:
             sustainedLowSpeedStart = nil
             lowSpeedCandidateStart = nil
+            stoppedResumeCandidateStart = nil
             
         case .idle, .ended:
             break
@@ -1544,6 +1610,7 @@ final class DriveStateMachine {
             pendingEndReason = nil
             lastOnFootAt = nil
             lowSpeedCandidateStart = nil
+            stoppedResumeCandidateStart = nil
             recentLocations.removeAll()
             // Reset one-shot debounce for next departure
             resetOneShotDebounce()
@@ -1590,6 +1657,7 @@ final class DriveStateMachine {
             // Track when stopped started (for timeout calculation)
             let now = Date()
             stoppedSince = now
+            stoppedResumeCandidateStart = nil
             // Persist to Drive model for crash/kill recovery (MUST be durable)
             if let drive = activeDrive {
                 drive.stoppedSince = now
@@ -1993,7 +2061,7 @@ final class DriveStateMachine {
             }
             
             // --- Clear-cut case 3: At saved place for extended period ---
-            if let lastPoint = lastActive.points.last {
+            if let lastPoint = lastActive.pointsChronological.last {
                 let coord = CLLocationCoordinate2D(latitude: lastPoint.latitude, longitude: lastPoint.longitude)
                 let lastPointAge = Date().timeIntervalSince(lastPoint.timestamp)
                 let lastPointMinutes = lastPointAge / 60
@@ -2023,3 +2091,4 @@ final class DriveStateMachine {
         }
     }
 }
+

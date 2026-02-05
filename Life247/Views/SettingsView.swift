@@ -153,12 +153,31 @@ struct SettingsView: View {
     @AppStorage("showSpeedHeatMap") private var showSpeedHeatMap = false
     @AppStorage("showSpeedTrace") private var showSpeedTrace = true
     @AppStorage("showPlacesOnMap") private var showPlacesOnMap = true
+    @AppStorage("showPlaceCenterMarkers") private var showPlaceCenterMarkers = false
+    @AppStorage("showMapStyleButton") private var showMapStyleButton = false
     @AppStorage("defaultZoomLevel") private var defaultZoomLevel: String = MapZoomLevel.area.rawValue
     @AppStorage("historyTimeSpan") private var historyTimeSpan: String = HistoryTimeSpan.off.rawValue
     @AppStorage("notifyOnStart") private var notifyOnStart = true
     @AppStorage("notifyOnEnd") private var notifyOnEnd = true
     
     @Environment(\.modelContext) private var modelContext
+
+    private var appVersionDisplay: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "\(version) (\(build))"
+    }
+
+    private var gitCommitDisplay: String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "GitCommitHash") as? String else {
+            return nil
+        }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.lowercased() != "unknown" else {
+            return nil
+        }
+        return value
+    }
     
     var body: some View {
         NavigationStack {
@@ -200,8 +219,20 @@ struct SettingsView: View {
                     
                     SettingsToggleRow(
                         title: "Show Saved Places",
-                        subtitle: "Display place markers on map",
+                        subtitle: "Display place geofence circles on map",
                         isOn: $showPlacesOnMap
+                    )
+                    SettingsDivider()
+                    SettingsToggleRow(
+                        title: "Place Center Markers",
+                        subtitle: "Show subtle center dots for saved places",
+                        isOn: $showPlaceCenterMarkers
+                    )
+                    SettingsDivider()
+                    SettingsToggleRow(
+                        title: "Map Style Button",
+                        subtitle: "Show map style picker button on dashboard",
+                        isOn: $showMapStyleButton
                     )
                     SettingsDivider()
                     SettingsToggleRow(
@@ -237,7 +268,11 @@ struct SettingsView: View {
                     // About
                     SettingsSectionHeader(title: "About")
                     
-                    SettingsValueRow(title: "Version", value: "1.0")
+                    SettingsValueRow(title: "Version", value: appVersionDisplay)
+                    if let gitCommitDisplay {
+                        SettingsDivider()
+                        SettingsValueRow(title: "Git", value: gitCommitDisplay)
+                    }
                     
                     Spacer(minLength: 100)
                 }

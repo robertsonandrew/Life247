@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Life247 (Minimal)</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Masonry JS -->
+    <script src="https://unpkg.com/masonry-layout@4/dist/masonry.pkgd.min.js"></script>
+
+    <style>
+        :root {
+            /* Concept 1: Soft Modern Dark */
+            --bg-color: #121212;
+            --text-primary: #ededed;
+            --text-secondary: #a1a1aa;
+            --text-tertiary: #52525b;
+
+            --card-bg: #1e1e1e;
+            --card-hover: #27272a;
+            --border-color: #2e2e30;
+
+            /* Accents - Desaturated "Pro" Colors */
+            --accent-primary: #3b82f6;
+            /* Blue 500 */
+            --accent-success: #10b981;
+            /* Emerald 500 */
+            --accent-warning: #f59e0b;
+            /* Amber 500 */
+            --accent-danger: #ef4444;
+            /* Red 500 */
+            --accent-purple: #8b5cf6;
+            /* Violet 500 */
+
+            --radius-sm: 8px;
+            --radius-md: 16px;
+            --radius-lg: 24px;
+
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+            --metric-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        [data-theme="light"] {
+            --bg-color: #fafafa;
+            --text-primary: #18181b;
+            --text-secondary: #71717a;
+            --text-tertiary: #a1a1aa;
+
+            --card-bg: #ffffff;
+            --card-hover: #f4f4f5;
+            --border-color: #e4e4e7;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--metric-font);
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            padding-bottom: 80px;
+        }
+
+        .container {
+            max-width: 1200px;
+            /* Slightly tighter container for focus */
+            margin: 0 auto;
+            padding: 60px 24px;
+        }
+
+        /* --- Typography --- */
+        h1 {
+            font-size: 32px;
+            font-weight: 600;
+            letter-spacing: -1px;
+            margin-bottom: 8px;
+        }
+
+        h2 {
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            margin: 48px 0 24px;
+        }
+
+        h3 {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            text-transform: capitalize;
+            /* Cleaner look */
+            letter-spacing: -0.2px;
+        }
+
+        .subtitle {
+            font-size: 16px;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        /* --- Header --- */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 60px;
+        }
+
+        .header-content {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 40px;
+        }
+
+        .header-stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header-stat-item .val {
+            font-size: 24px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .header-stat-item .lbl {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* --- Buttons --- */
+        .btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 10px 20px;
+            border-radius: 100px;
+            /* Pill shape */
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            color: var(--text-primary);
+            border-color: var(--text-secondary);
+            background: var(--card-bg);
+        }
+
+        .btn-primary {
+            background: var(--text-primary);
+            color: var(--bg-color);
+            border-color: var(--text-primary);
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            background: var(--text-primary);
+        }
+
+        /* --- Cards --- */
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--radius-lg);
+            padding: 32px;
+            box-shadow: var(--shadow-sm);
+            /* Minimal shadow */
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid transparent;
+            /* No visible border unless hover in dark mode maybe */
+        }
+
+        /* Subtle border in dark mode for contrast */
+        [data-theme="dark"] .card {
+            border: 1px solid var(--border-color);
+        }
+
+        .card:hover {
+            box-shadow: var(--shadow-md);
+        }
+
+        /* --- Bento Grid --- */
+        .grid-dashboard {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+            margin-bottom: 60px;
+            /* Concept 1 Layout Change: Analytics focus */
+            grid-template-areas:
+                "overview overview weekly weekly"
+                "reasons records quality behavior";
+        }
+
+        @media (max-width: 1200px) {
+            .grid-dashboard {
+                grid-template-columns: repeat(2, 1fr);
+                grid-template-areas:
+                    "overview overview"
+                    "weekly weekly"
+                    "reasons records"
+                    "quality behavior";
+            }
+        }
+
+        @media (max-width: 768px) {
+            .grid-dashboard {
+                grid-template-columns: 1fr;
+                grid-template-areas: "overview" "weekly" "reasons" "records" "quality" "behavior";
+            }
+        }
+
+        /* Areas */
+        .area-overview {
+            grid-area: overview;
+        }
+
+        .area-weekly {
+            grid-area: weekly;
+        }
+
+        .area-reasons {
+            grid-area: reasons;
+        }
+
+        .area-records {
+            grid-area: records;
+        }
+
+        .area-quality {
+            grid-area: quality;
+        }
+
+        .area-behavior {
+            grid-area: behavior;
+        }
+
+        /* --- Stats Styling --- */
+        .overview-row {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 12px;
+        }
+
+        .overview-row .stat-item {
+            flex: 1;
+        }
+
+        .stat-item .value {
+            font-size: 36px;
+            font-weight: 700;
+            letter-spacing: -1.5px;
+            color: var(--text-primary);
+        }
+
+        .stat-item .unit {
+            font-size: 14px;
+            color: var(--text-tertiary);
+            font-weight: 500;
+            margin-top: 4px;
+        }
+
+        /* --- Charts --- */
+        .chart-container {
+            width: 100%;
+            height: 180px;
+            position: relative;
+        }
+
+        /* --- Drive Timeline / Cards (Minimalist List) --- */
+        .drives-list-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .drives-masonry {
+            /* Masonry logic stays */
+        }
+
+        .grid-item {
+            width: calc(33.333% - 16px);
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .grid-item {
+                width: calc(50% - 12px);
+            }
+        }
+
+        @media (max-width: 600px) {
+            .grid-item {
+                width: 100%;
+            }
+        }
+
+        .drive-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            border: 1px solid var(--border-color);
+        }
+
+        .drive-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--text-secondary);
+        }
+
+        .drive-minimap {
+            height: 160px;
+            /* Slightly taller */
+            background: #1a1a1a;
+            position: relative;
+        }
+
+        .drive-content {
+            padding: 20px;
+        }
+
+        .drive-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .drive-date {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .drive-timestamp {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .drive-stats-row {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .ds-item {
+            text-align: left;
+        }
+
+        .ds-item .val {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .ds-item .lbl {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            font-weight: 500;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+
+        /* --- Badges --- */
+        .tag-pill {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 6px;
+            text-transform: uppercase;
+        }
+
+        .tag-blue {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-primary);
+        }
+
+        /* GForce Badges Minimal */
+        .gforce-badges {
+            display: flex;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .gf-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid currentColor;
+        }
+
+        .gf-brake {
+            color: var(--accent-danger);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+
+        .gf-accel {
+            color: var(--accent-warning);
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+
+        .gf-corner {
+            color: var(--accent-warning);
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+
+        /* Simplification */
+
+        /* --- Filters (Clean Bar) --- */
+        .filters-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 32px;
+            align-items: center;
+        }
+
+        .filter-input {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .filter-input:focus {
+            border-color: var(--text-secondary);
+        }
+
+        /* --- Modals, Heatmap, Nerdy Details (Hidden mostly) --- */
+        /* Copying base styles necessary for function but simplified */
+        .heatmap-grid {
+            display: grid;
+            grid-template-rows: repeat(7, 1fr);
+            grid-auto-flow: column;
+            gap: 3px;
+        }
+
+        .day-cell {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            background: var(--card-hover);
+        }
+
+        .day-cell[data-l="1"] {
+            background: #064e3b;
+        }
+
+        .day-cell[data-l="2"] {
+            background: #059669;
+        }
+
+        .day-cell[data-l="3"] {
+            background: #10b981;
+        }
+
+        .day-cell[data-l="4"] {
+            background: #34d399;
+        }
+
+        .nerdy-toggle {
+            padding: 12px;
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .nerdy-details {
+            display: none;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .nerdy-details.show {
+            display: block;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-window {
+            width: 90%;
+            max-width: 1000px;
+            height: 80vh;
+            background: var(--bg-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-top {
+            padding: 16px 24px;
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #map-leaflet {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Auth */
+        .auth-overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--bg-color);
+            z-index: 2000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .auth-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 40px;
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Auth Modal -->
+    <div id="auth-view" class="auth-overlay">
+        <div class="auth-card">
+            <h2>Welcome Back</h2>
+            <br>
+            <input type="password" id="api-key-input" class="filter-input" placeholder="Paste API Key..."
+                style="width: 100%;">
+            <br><br>
+            <button class="btn btn-primary" onclick="saveAuth()"
+                style="width: 100%; justify-content: center;">Connect</button>
+        </div>
+    </div>
+
+    <!-- Main Modal -->
+    <div id="main-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-top">
+                <h3 id="modal-title" style="margin:0; color: var(--text-primary);">Details</h3>
+                <button class="btn" onclick="closeModal()">Close</button>
+            </div>
+            <div style="flex:1; position: relative;">
+                <div id="map-leaflet"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" id="dashboard-container">
+
+        <header>
+            <div class="header-content">
+                <div>
+                    <h1>Dashboard</h1>
+                    <div class="subtitle">Your driving history and analytics</div>
+                </div>
+                <!-- Prominent High Level Stats -->
+                <div class="header-stats">
+                    <div class="header-stat-item">
+                        <span class="val" id="chip-drives">-</span>
+                        <span class="lbl">Total Drives</span>
+                    </div>
+                    <div class="header-stat-item">
+                        <span class="val" id="chip-miles">-</span>
+                        <span class="lbl">Miles Tracked</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-controls">
+                <button class="btn" onclick="openGlobalMap()">View Map</button>
+                <button class="btn" onclick="toggleTheme()">Theme</button>
+                <button class="btn" style="border:none;" onclick="showAuth()">🔒</button>
+            </div>
+        </header>
+
+        <div id="stats-section" class="grid-dashboard">
+            <!-- Overview: Driver Score & Heatmap -->
+            <div class="card area-overview">
+                <h3>Driver Health</h3>
+                <div style="display: flex; gap: 40px; align-items: flex-end;">
+                    <div>
+                        <span class="value" style="font-size: 56px; line-height: 1; color: var(--accent-success);"
+                            id="stat-score">98</span>
+                        <span class="unit" style="display:block;">Safety Score</span>
+                    </div>
+                    <div style="flex:1;">
+                        <!-- Heatmap embedded -->
+                        <div style="margin-bottom: 8px; font-size: 12px; color: var(--text-tertiary);">Consistency</div>
+                        <div class="heatmap-scroll" style="overflow-x: auto;">
+                            <div id="heatmap-grid" class="heatmap-grid"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="overview-row" style="margin-top: 32px;">
+                    <div class="stat-item">
+                        <span class="value" id="stat-drives">-</span>
+                        <span class="unit">Total Trips</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="value" id="stat-miles">-</span>
+                        <span class="unit">Total Miles</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="value" id="stat-hours">-</span>
+                        <span class="unit">Hours Driven</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Weekly Chart -->
+            <div class="card area-weekly">
+                <div style="display:flex; justify-content:space-between; align-items: center;">
+                    <h3>Weekly Distances</h3>
+                    <span id="weekly-trend" style="font-size: 14px; color: var(--accent-success);">--</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="weeklyChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Reasons -->
+            <div class="card area-reasons">
+                <h3>Intent</h3>
+                <div class="chart-container" style="height: 140px;">
+                    <canvas id="reasonsChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Records -->
+            <div class="card area-records">
+                <h3>Records</h3>
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <div>
+                        <div style="font-size: 12px; color: var(--text-tertiary);">Longest Drive</div>
+                        <div style="font-size: 18px; font-weight: 600;" id="rec-dist-val">-</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: var(--text-tertiary);">Top Speed</div>
+                        <div style="font-size: 18px; font-weight: 600;" id="rec-spd-val">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quality & Behavior combined conceptually or separated? Keep separated for grid balance -->
+            <div class="card area-quality">
+                <h3>System</h3>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div style="display:flex; justify-content: space-between;">
+                        <span style="font-size:14px; color: var(--text-secondary);">Capture Rate</span>
+                        <span style="font-size:14px; font-weight:600;" id="stat-sample-rate">-</span>
+                    </div>
+                    <div style="display:flex; justify-content: space-between;">
+                        <span style="font-size:14px; color: var(--text-secondary);">Avg Latency</span>
+                        <span style="font-size:14px; font-weight:600;" id="stat-avg-latency">-</span>
+                    </div>
+                    <div style="display:flex; justify-content: space-between;">
+                        <span style="font-size:14px; color: var(--text-secondary);">Battery</span>
+                        <span style="font-size:14px; font-weight:600;" id="qm-battery-drain">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card area-behavior">
+                <h3>Incidents</h3>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display:flex; align-items: center; gap: 8px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent-danger);">
+                        </div>
+                        <span style="font-size:14px; color: var(--text-secondary); flex:1;">Brakes</span>
+                        <span style="font-size:14px; font-weight:600;" id="gf-brakes">-</span>
+                    </div>
+                    <div style="display:flex; align-items: center; gap: 8px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent-warning);">
+                        </div>
+                        <span style="font-size:14px; color: var(--text-secondary); flex:1;">Accel</span>
+                        <span style="font-size:14px; font-weight:600;" id="gf-accels">-</span>
+                    </div>
+                    <div style="display:flex; align-items: center; gap: 8px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent-warning);">
+                        </div>
+                        <span style="font-size:14px; color: var(--text-secondary); flex:1;">Corners</span>
+                        <span style="font-size:14px; font-weight:600;" id="gf-corners">-</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Drives List -->
+        <div class="drives-list-header">
+            <h2>Recent Activities</h2>
+            <div class="filters-bar" style="margin-bottom:0;">
+                <input type="text" id="search-input" class="filter-input" placeholder="Search..."
+                    onkeyup="handleFilter()">
+                <select id="sort-select" class="filter-input" onchange="handleFilter()">
+                    <option value="newest">Newest</option>
+                    <option value="longest">Distance</option>
+                    <option value="duration">Duration</option>
+                </select>
+                <div id="count-label" style="font-size: 13px; color: var(--text-tertiary);">...</div>
+            </div>
+        </div>
+
+        <div id="drives-grid" class="drives-masonry">
+            <!-- JS Injected -->
+        </div>
+
+        <div style="text-align: center; margin-top: 40px;">
+            <button id="load-more-btn" class="btn" onclick="loadMore()" style="display:none; margin: 0 auto;">Load
+                More</button>
+        </div>
+
+    </div>
+
+    <!-- SCRIPT contains same logic as original but attached to new IDs/Classes where needed -->
+    <script>
+        // --- Shared Logic ---
+        let apiKey = localStorage.getItem('life247_api_key') || '';
+        let allDrives = [];
+        let displayedDrives = [];
+        let masonryInstance = null;
+        let limit = 20;
+
+        // Simplified map styles for this theme
+        const mapUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+        const mapAttr = '&copy; CARTO';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!apiKey) showAuth();
+            else loadData();
+        });
+
+        function showAuth() { document.getElementById('auth-view').style.display = 'flex'; }
+        function saveAuth() {
+            const val = document.getElementById('api-key-input').value.trim();
+            if (val) {
+                apiKey = val; localStorage.setItem('life247_api_key', apiKey);
+                document.getElementById('auth-view').style.display = 'none';
+                loadData();
+            }
+        }
+        function closeModal() { document.getElementById('main-modal').classList.remove('active'); }
+        function toggleTheme() {
+            const r = document.documentElement;
+            r.setAttribute('data-theme', r.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+        }
+
+        async function loadData() {
+            try {
+                const headers = {}; if (apiKey) headers['X-API-Key'] = apiKey;
+                const res = await fetch('/drives?limit=5000', { headers });
+                if (res.status === 401) { apiKey = ''; showAuth(); return; }
+                if (!res.ok) throw new Error("Err");
+                allDrives = await res.json();
+                allDrives.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+
+                renderAnalytics(allDrives);
+                handleFilter();
+            } catch (e) { console.error(e); }
+        }
+
+        // --- Renderers ---
+        function renderAnalytics(drives) {
+            const totalMiles = drives.reduce((a, d) => a + (d.distanceMeters || 0), 0) * 0.000621371;
+            const totalSecs = drives.reduce((a, d) => a + (d.durationSeconds || 0), 0);
+
+            // Text Stats
+            setText('stat-drives', drives.length.toLocaleString());
+            setText('chip-drives', drives.length.toLocaleString());
+            setText('stat-miles', Math.round(totalMiles).toLocaleString());
+            setText('chip-miles', Math.round(totalMiles).toLocaleString());
+            setText('stat-hours', Math.round(totalSecs / 3600).toLocaleString());
+
+            // Score
+            const totalEvents = drives.reduce((a, d) => a + (d.hardBrakeCount || 0) + (d.hardAccelCount || 0) + (d.hardCornerCount || 0), 0);
+            let score = 100;
+            if (totalMiles > 0) score = Math.max(0, Math.min(100, 100 - ((totalEvents / totalMiles) * 10)));
+            setText('stat-score', Math.round(score));
+
+            // Heatmap
+            renderHeatmap(drives);
+            // Weekly
+            renderWeeklyChart(drives);
+            // Reasons
+            renderReasonChart(drives);
+            // Records
+            renderRecords(drives);
+            // Quality
+            renderQuality(drives);
+            // Behavior
+            renderBehavior(drives);
+        }
+
+        function setText(id, val) { const el = document.getElementById(id); if (el) el.innerText = val; }
+
+        function renderHeatmap(drives) {
+            const grid = document.getElementById('heatmap-grid'); grid.innerHTML = '';
+            const map = {}; drives.forEach(d => { const k = d.startTime.split('T')[0]; map[k] = (map[k] || 0) + (d.distanceMeters * 0.000621371); });
+            const start = new Date(); start.setDate(start.getDate() - (52 * 7));
+            for (let i = 0; i < 52 * 7; i++) {
+                const d = new Date(start); d.setDate(d.getDate() + i);
+                const k = d.toISOString().split('T')[0];
+                const val = map[k] || 0;
+                let l = 0; if (val > 0) l = 1; if (val > 10) l = 2; if (val > 30) l = 3;
+                const cell = document.createElement('div'); cell.className = 'day-cell'; cell.dataset.l = l; cell.title = `${k}: ${val.toFixed(1)}mi`;
+                grid.appendChild(cell);
+            }
+        }
+
+        function renderWeeklyChart(drives) {
+            const ctx = document.getElementById('weeklyChart').getContext('2d');
+            const data = []; const labels = []; const now = new Date();
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(now); d.setDate(d.getDate() - i);
+                const k = d.toISOString().split('T')[0];
+                labels.push(['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.getDay()]);
+                const miles = drives.filter(x => x.startTime.startsWith(k)).reduce((a, b) => a + (b.distanceMeters * 0.000621371), 0);
+                data.push(miles);
+            }
+
+            new Chart(ctx, {
+                type: 'bar', // Clean bar chart for Minimalist
+                data: {
+                    labels,
+                    datasets: [{
+                        data, backgroundColor: '#3b82f6', borderRadius: 4, barThickness: 12
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: 'gray' } },
+                        y: { display: false }
+                    }
+                }
+            });
+        }
+
+        function renderReasonChart(drives) {
+            const ctx = document.getElementById('reasonsChart').getContext('2d');
+            const counts = {}; drives.forEach(d => counts[d.startReason || 'Unknown'] = (counts[d.startReason || 'Unknown'] || 0) + 1);
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(counts),
+                    datasets: [{
+                        data: Object.values(counts),
+                        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, cutout: '80%',
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function renderRecords(drives) {
+            const maxDist = drives.reduce((p, c) => p.distanceMeters > c.distanceMeters ? p : c);
+            const maxSpd = drives.reduce((p, c) => p.maxSpeedMPH > c.maxSpeedMPH ? p : c);
+            setText('rec-dist-val', (maxDist.distanceMeters * 0.000621371).toFixed(1) + ' mi');
+            setText('rec-spd-val', Math.round(maxSpd.maxSpeedMPH) + ' mph');
+        }
+
+        function renderQuality(drives) {
+            const withM = drives.filter(d => d.detectionLatencyMs != null);
+            if (!withM.length) return;
+            const samples = withM.reduce((a, d) => a + (d.locationSampleCount || 0), 0);
+            const drops = withM.reduce((a, d) => a + (d.droppedSampleCount || 0), 0);
+            const rate = samples > 0 ? Math.round((samples / (samples + drops)) * 100) : 100;
+            setText('stat-sample-rate', rate + '%');
+
+            const latencies = withM.map(d => d.detectionLatencyMs).filter(l => l != null && l > 0);
+            const avgL = latencies.length ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0;
+            setText('stat-avg-latency', avgL + 'ms');
+
+            // Rough battery calc
+            const drains = withM.filter(d => d.batteryLevelAtStart != null && d.batteryLevelAtEnd != null).map(d => d.batteryLevelAtStart - d.batteryLevelAtEnd);
+            const avgDrain = drains.length ? (drains.reduce((a, b) => a + b, 0) / drains.length * 100).toFixed(1) : '-';
+            setText('qm-battery-drain', avgDrain + '%');
+        }
+
+        function renderBehavior(drives) {
+            const brakes = drives.reduce((a, d) => a + (d.hardBrakeCount || 0), 0);
+            const accels = drives.reduce((a, d) => a + (d.hardAccelCount || 0), 0);
+            const servs = drives.reduce((a, d) => a + (d.hardCornerCount || 0), 0);
+            setText('gf-brakes', brakes); setText('gf-accels', accels); setText('gf-corners', servs);
+        }
+
+        // --- List ---
+        function handleFilter() {
+            const txt = document.getElementById('search-input').value.toLowerCase();
+            const sort = document.getElementById('sort-select').value;
+
+            let filtered = allDrives.filter(d => {
+                if (!txt) return true;
+                return (d.startReason || '').toLowerCase().includes(txt) || (d.deviceModel || '').toLowerCase().includes(txt);
+            });
+
+            if (sort === 'newest') filtered.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+            if (sort === 'longest') filtered.sort((a, b) => b.distanceMeters - a.distanceMeters);
+            if (sort === 'duration') filtered.sort((a, b) => b.durationSeconds - a.durationSeconds);
+
+            displayedDrives = filtered;
+            setText('count-label', `${filtered.length} found`);
+
+            const grid = document.getElementById('drives-grid'); grid.innerHTML = '';
+            if (masonryInstance) masonryInstance.destroy();
+            limit = 20; appendItems(0, limit);
+
+            masonryInstance = new Masonry(grid, { itemSelector: '.grid-item', columnWidth: '.grid-item', gutter: 24, percentPosition: true });
+            document.getElementById('load-more-btn').style.display = limit < displayedDrives.length ? 'block' : 'none';
+        }
+
+        function loadMore() {
+            const s = limit; limit += 20; appendItems(s, limit);
+            masonryInstance.reloadItems(); masonryInstance.layout();
+            document.getElementById('load-more-btn').style.display = limit < displayedDrives.length ? 'block' : 'none';
+        }
+
+        function appendItems(start, end) {
+            const slice = displayedDrives.slice(start, end);
+            const grid = document.getElementById('drives-grid');
+
+            const html = slice.map(d => {
+                const dist = (d.distanceMeters * 0.000621371).toFixed(1);
+                const dur = Math.round(d.durationSeconds / 60);
+                const date = new Date(d.startTime);
+                const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                const timeStr = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+                let badges = '';
+                if (d.hardBrakeCount) badges += `<span class="gf-badge gf-brake">${d.hardBrakeCount} HB</span>`;
+                if (d.hardAccelCount) badges += `<span class="gf-badge gf-accel">${d.hardAccelCount} HA</span>`;
+
+                return `
+                <div class="grid-item">
+                    <div class="drive-card" onclick="openMapModal('${d.driveId}')">
+                        <div class="drive-minimap" id="mini-${d.driveId}"></div>
+                        <div class="drive-content">
+                            <div class="drive-header-row">
+                                <div>
+                                    <div class="drive-date">${dateStr}</div>
+                                    <div class="drive-timestamp">${timeStr}</div>
+                                </div>
+                                ${d.startReason ? `<span class="tag-pill tag-blue">${d.startReason}</span>` : ''}
+                            </div>
+                            <div class="drive-stats-row">
+                                <div class="ds-item"><div class="val">${dist}</div><div class="lbl">Miles</div></div>
+                                <div class="ds-item"><div class="val">${dur}</div><div class="lbl">Min</div></div>
+                                <div class="ds-item"><div class="val">${Math.round(d.maxSpeedMPH || 0)}</div><div class="lbl">MPH</div></div>
+                            </div>
+                            <div class="gforce-badges">${badges}</div>
+                            <div class="nerdy-toggle" onclick="event.stopPropagation(); toggleNerdy(this)">Details</div>
+                            <div class="nerdy-details">
+                                <div style="font-size:11px; font-family:monospace; color: var(--text-tertiary);">
+                                    Device: ${d.deviceModel}<br>
+                                    Battery: ${d.batteryLevelAtStart || '?'}% -> ${d.batteryLevelAtEnd || '?'}%<br>
+                                    Samples: ${d.locationSampleCount}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+            }).join('');
+
+            grid.insertAdjacentHTML('beforeend', html);
+
+            // Map init
+            setTimeout(() => {
+                slice.forEach(d => {
+                    const el = document.getElementById(`mini-${d.driveId}`);
+                    if (!el) return;
+                    try {
+                        const m = L.map(el, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false });
+                        L.tileLayer(mapUrl).addTo(m);
+                        const pts = decodePolyline(d.polyline);
+                        if (pts.length) {
+                            L.polyline(pts, { color: '#3b82f6', weight: 4 }).addTo(m);
+                            m.fitBounds(L.polyline(pts).getBounds(), { padding: [20, 20] });
+                        }
+                    } catch (e) { }
+                });
+            }, 50);
+        }
+
+        function toggleNerdy(btn) {
+            const d = btn.nextElementSibling;
+            d.style.display = d.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function openGlobalMap() {
+            document.getElementById('main-modal').classList.add('active');
+            document.getElementById('modal-title').innerText = "All Drives";
+            const m = L.map('map-leaflet').setView([0, 0], 2);
+            L.tileLayer(mapUrl).addTo(m);
+            const bounds = L.latLngBounds([]);
+            allDrives.forEach(d => {
+                const pts = decodePolyline(d.polyline);
+                if (pts.length) {
+                    L.polyline(pts, { color: '#3b82f6', weight: 2, opacity: 0.5 }).addTo(m);
+                    bounds.extend(pts);
+                }
+            });
+            if (bounds.isValid()) m.fitBounds(bounds);
+        }
+
+        // Polyline Algo
+        function decodePolyline(str, precision) {
+            var index = 0, lat = 0, lng = 0, coordinates = [], shift = 0, result = 0, byte = null, latitude_change, longitude_change, factor = Math.pow(10, precision || 5);
+            if (!str) return [];
+            while (index < str.length) {
+                byte = null; shift = 0; result = 0;
+                do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+                latitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                shift = result = 0;
+                do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+                longitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                lat += latitude_change; lng += longitude_change;
+                coordinates.push([lat / factor, lng / factor]);
+            }
+            return coordinates;
+        }
+
+        // Open Map logic
+        function openMapModal(id) {
+            const d = allDrives.find(x => x.driveId === id); if (!d) return;
+            document.getElementById('main-modal').classList.add('active');
+            document.getElementById('modal-title').innerText = new Date(d.startTime).toLocaleString();
+
+            // Destroy old map if exists (not implemented in this simplified version, assuming naive)
+            const c = document.getElementById('map-leaflet');
+            c.outerHTML = C.outerHTML; // Reset ref
+            // Using innerHTML reset to prevent leak for demo:
+            document.getElementById('map-leaflet').innerHTML = "";
+            document.getElementById('map-leaflet').remove();
+            const newCont = document.createElement('div'); newCont.id = 'map-leaflet';
+            document.querySelector('.modal-window > div:last-child').appendChild(newCont);
+
+            const m = L.map('map-leaflet');
+            L.tileLayer(mapUrl).addTo(m);
+            const pts = decodePolyline(d.polyline);
+            if (pts.length) {
+                const p = L.polyline(pts, { color: '#3b82f6', weight: 6 }).addTo(m);
+                m.fitBounds(p.getBounds());
+            }
+        }
+    </script>
+</body>
+
+</html>

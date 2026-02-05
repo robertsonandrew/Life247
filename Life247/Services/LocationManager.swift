@@ -124,10 +124,11 @@ final class LocationManager: NSObject, ObservableObject {
     @MainActor
     func enableHighAccuracy(reason: String) {
         let wasEmpty = highAccuracyReasons.isEmpty
-        highAccuracyReasons.insert(reason)
-        logger.info("High-accuracy requested for: \(reason) (active: \(self.highAccuracyReasons))")
-        
-        if wasEmpty {
+        let (inserted, _) = highAccuracyReasons.insert(reason)
+        if inserted {
+            logger.info("High-accuracy requested for: \(reason) (active: \(self.highAccuracyReasons))")
+        }
+        if wasEmpty && !highAccuracyReasons.isEmpty {
             startHighAccuracyTracking()
         }
     }
@@ -188,6 +189,11 @@ final class LocationManager: NSObject, ObservableObject {
         logger.info("Stopping high-accuracy location tracking")
         locationManager.stopUpdatingLocation()
         locationManager.stopUpdatingHeading()
+        if hasAlwaysAuthorization {
+            locationManager.showsBackgroundLocationIndicator = false
+            locationManager.allowsBackgroundLocationUpdates = false
+            locationManager.pausesLocationUpdatesAutomatically = true
+        }
         currentHeading = nil
         isHighAccuracyMode = false
         
@@ -299,7 +305,7 @@ extension LocationManager: CLLocationManagerDelegate {
     }
     
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
+        guard !locations.isEmpty else { return }
 
         Task { @MainActor in
             // If we're in low-power mode (SLC + visits), treat this update as an SLC wake for logging/diagnostics.
@@ -319,16 +325,21 @@ extension LocationManager: CLLocationManagerDelegate {
                 }
             }
 
-            logger.debug("Location update: \(location.coordinate.latitude), \(location.coordinate.longitude) @ \(location.speed)m/s")
+            let sortedLocations = locations.sorted { $0.timestamp < $1.timestamp }
+            if sortedLocations.count > 1 {
+                logger.debug("Location batch: \(sortedLocations.count) updates")
+            }
 
-            // Feed raw GPS to accelerometer detector (bypasses filter)
-            motionManager?.updateAccelerometerGPS(location)
-            
-            // Route through filter for jitter suppression (falls back to direct if no filter)
-            if let filter = locationFilter {
-                filter.process(location, isHighAccuracyMode: isHighAccuracyMode)
-            } else {
-                eventSink?.handle(.locationUpdate(location))
+            for location in sortedLocations {
+                // Feed raw GPS to accelerometer detector (bypasses filter)
+                motionManager?.updateAccelerometerGPS(location)
+
+                // Route through filter for jitter suppression (falls back to direct if no filter)
+                if let filter = locationFilter {
+                    filter.process(location, isHighAccuracyMode: isHighAccuracyMode)
+                } else {
+                    eventSink?.handle(.locationUpdate(location))
+                }
             }
 
             if shouldUseBackgroundTask {
@@ -436,3 +447,4 @@ extension LocationManager: CLLocationManagerDelegate {
         }
     }
 }
+

@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Life247 Hub</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Nord Theme Palette */
+            --nord0: #2e3440;
+            --nord1: #3b4252;
+            --nord2: #434c5e;
+            --nord3: #4c566a;
+            --nord4: #d8dee9;
+            --nord5: #e5e9f0;
+            --nord6: #eceff4;
+            --nord7: #8fbcbb;
+            --nord8: #88c0d0;
+            --nord9: #81a1c1;
+            --nord10: #5e81ac;
+            --nord11: #bf616a;
+            --nord12: #d08770;
+            --nord13: #ebcb8b;
+            --nord14: #a3be8c;
+            --nord15: #b48ead;
+
+            /* Functional Variables */
+            --bg-color: var(--nord0);
+            --sidebar-bg: var(--nord1);
+            --card-bg: var(--nord1);
+            --card-border: var(--nord2);
+            --text-primary: var(--nord6);
+            --text-secondary: var(--nord4);
+            --accent: var(--nord8);
+            --hover-bg: var(--nord2);
+
+            --sidebar-width: 280px;
+            --radius: 16px;
+            --gap: 16px;
+            --font-stack: 'Inter', -apple-system, blinkmacsystemfont, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-stack);
+            margin: 0;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar Styles */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: rgba(59, 66, 82, 0.8);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid var(--card-border);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            height: 100vh;
+            padding: 32px 20px;
+            z-index: 100;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--nord6);
+            margin-bottom: 48px;
+            padding: 0 12px;
+        }
+
+        .brand-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--nord8);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(136, 192, 208, 0.3);
+        }
+
+        .nav-section {
+            margin-bottom: 32px;
+        }
+
+        .nav-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--nord3);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+            padding: 0 12px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            color: var(--nord4);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            margin-bottom: 4px;
+        }
+
+        .nav-item:hover,
+        .nav-item.active {
+            background: var(--hover-bg);
+            color: var(--nord6);
+        }
+
+        .nav-item svg {
+            width: 18px;
+            height: 18px;
+            opacity: 0.7;
+        }
+
+        .nav-item.active svg {
+            opacity: 1;
+            color: var(--nord8);
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding: 20px;
+            background: var(--nord2);
+            border-radius: var(--radius);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .status-label {
+            color: var(--nord4);
+            opacity: 0.7;
+        }
+
+        .status-value {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--nord14);
+        }
+
+        /* Main Content */
+        .main-content {
+            margin-left: var(--sidebar-width);
+            flex: 1;
+            padding: 40px;
+            max-width: 1600px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+
+        .header-title h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .header-title p {
+            margin: 4px 0 0;
+            color: var(--nord3);
+            font-size: 14px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+            background: var(--nord1);
+            color: var(--nord6);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: var(--nord2);
+            border-color: var(--nord3);
+        }
+
+        .btn-primary {
+            background: var(--nord8);
+            color: var(--nord0);
+            border: none;
+        }
+
+        .btn-primary:hover {
+            background: var(--nord7);
+        }
+
+        /* Bento Grid */
+        .bento-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-auto-rows: minmax(160px, auto);
+            gap: var(--gap);
+            margin-bottom: 48px;
+        }
+
+        .card {
+            background: rgba(59, 66, 82, 0.6);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card:hover {
+            border-color: var(--nord8);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(136, 192, 208, 0.1);
+        }
+
+        .col-span-1 {
+            grid-column: span 1;
+        }
+
+        .col-span-2 {
+            grid-column: span 2;
+        }
+
+        .col-span-3 {
+            grid-column: span 3;
+        }
+
+        .col-span-full {
+            grid-column: 1 / -1;
+        }
+
+        .row-span-2 {
+            grid-row: span 2;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--nord3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card-icon {
+            color: var(--nord8);
+            opacity: 0.8;
+        }
+
+        .card-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-top: auto;
+        }
+
+        .card-subtext {
+            font-size: 12px;
+            color: var(--nord14);
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .chart-container {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+        }
+
+        /* Drive List */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .section-header h2 {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .drive-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: var(--gap);
+        }
+
+        .drive-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .drive-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--nord8);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .drive-map {
+            height: 160px;
+            background: var(--nord0);
+            position: relative;
+        }
+
+        .drive-info {
+            padding: 20px;
+        }
+
+        .drive-time {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .drive-meta {
+            display: flex;
+            gap: 12px;
+            font-size: 12px;
+            color: var(--nord4);
+            opacity: 0.7;
+        }
+
+        .drive-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--card-border);
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-val {
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .stat-lbl {
+            font-size: 10px;
+            color: var(--nord3);
+            text-transform: uppercase;
+        }
+
+        .tag {
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            background: var(--nord2);
+            color: var(--nord4);
+        }
+
+        /* Modal */
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(46, 52, 64, 0.8);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: var(--nord1);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 440px;
+            text-align: center;
+        }
+
+        .input-group {
+            margin: 24px 0;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px;
+            background: var(--nord0);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            color: var(--nord6);
+            font-family: inherit;
+        }
+
+        /* Consistency Map */
+        .heatmap-grid {
+            display: grid;
+            grid-template-columns: repeat(52, 1fr);
+            grid-template-rows: repeat(7, 1fr);
+            gap: 3px;
+            aspect-ratio: 7 / 1;
+        }
+
+        .heatmap-cell {
+            background: var(--nord2);
+            border-radius: 2px;
+        }
+
+        .heatmap-cell[data-level="1"] {
+            background: #4c566a;
+        }
+
+        .heatmap-cell[data-level="2"] {
+            background: #81a1c1;
+        }
+
+        .heatmap-cell[data-level="3"] {
+            background: #88c0d0;
+        }
+
+        .heatmap-cell[data-level="4"] {
+            background: #8fbcbb;
+        }
+
+        @media (max-width: 1024px) {
+            .sidebar {
+                width: 80px;
+                padding: 20px 10px;
+            }
+
+            .brand span,
+            .nav-item span,
+            .nav-label,
+            .sidebar-footer {
+                display: none;
+            }
+
+            .main-content {
+                margin-left: 80px;
+            }
+
+            .bento-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
+                    stroke-linejoin="round" style="width: 20px; height: 20px; color: var(--nord0);">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                </svg>
+            </div>
+            <span>Life247</span>
+        </div>
+
+        <nav class="nav-section">
+            <div class="nav-label">Menu</div>
+            <a href="#" class="nav-item active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+                <span>Dashboard</span>
+            </a>
+            <a href="#" class="nav-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                <span>Analytics</span>
+            </a>
+            <a href="#" class="nav-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+                <span>Places</span>
+            </a>
+            <a href="#" class="nav-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                    <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                </svg>
+                <span>Devices</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="status-row">
+                <span class="status-label">Server Status</span>
+                <span class="status-value">
+                    <div class="status-dot"></div>
+                    Online
+                </span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">API Version</span>
+                <span class="status-value">v2.4.0</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <header>
+            <div class="header-title">
+                <h1>Hub Overview</h1>
+                <p id="time-range">Displaying data for the last 30 days</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn" onclick="toggleMap()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" style="width: 16px;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <path
+                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
+                        </path>
+                    </svg>
+                    Global Map
+                </button>
+                <button class="btn btn-primary" onclick="loadData()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" style="width: 16px;">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                    Refresh
+                </button>
+            </div>
+        </header>
+
+        <div class="bento-grid">
+            <!-- Stats -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Total Distance</span>
+                    <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        style="width: 16px;">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                </div>
+                <div class="card-value" id="stat-distance">0 mi</div>
+                <div class="card-subtext">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px;">
+                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                        <polyline points="17 6 23 6 23 12"></polyline>
+                    </svg>
+                    <span>12% from last month</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Total Drives</span>
+                    <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        style="width: 16px;">
+                        <rect x="1" y="3" width="15" height="13"></rect>
+                        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                        <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                        <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                    </svg>
+                </div>
+                <div class="card-value" id="stat-drives">0</div>
+                <div class="card-subtext">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px;">
+                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                        <polyline points="17 6 23 6 23 12"></polyline>
+                    </svg>
+                    <span>5 new today</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Safety Score</span>
+                    <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        style="width: 16px;">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                </div>
+                <div class="card-value" id="stat-score">98</div>
+                <div class="card-subtext" style="color: var(--nord14);">
+                    Excellent driving behavior
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Avg. Duration</span>
+                    <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        style="width: 16px;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </div>
+                <div class="card-value" id="stat-duration">0m</div>
+                <div class="card-subtext">
+                    Per trip average
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="card col-span-2 row-span-2">
+                <div class="card-header">
+                    <span class="card-title">Activity Trend</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-activity"></canvas>
+                </div>
+            </div>
+
+            <div class="card col-span-2">
+                <div class="card-header">
+                    <span class="card-title">Consistency Map</span>
+                </div>
+                <div id="heatmap" class="heatmap-grid" style="margin-top: 10px;"></div>
+                <div
+                    style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 12px; font-size: 10px; color: var(--nord3);">
+                    <span>Less</span>
+                    <div style="width: 10px; height: 10px; background: var(--nord2); border-radius: 2px;"></div>
+                    <div style="width: 10px; height: 10px; background: #4c566a; border-radius: 2px;"></div>
+                    <div style="width: 10px; height: 10px; background: #81a1c1; border-radius: 2px;"></div>
+                    <div style="width: 10px; height: 10px; background: #88c0d0; border-radius: 2px;"></div>
+                    <div style="width: 10px; height: 10px; background: #8fbcbb; border-radius: 2px;"></div>
+                    <span>More</span>
+                </div>
+            </div>
+
+            <div class="card col-span-1">
+                <div class="card-header">
+                    <span class="card-title">Intent Distribution</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-intent"></canvas>
+                </div>
+            </div>
+
+            <div class="card col-span-1">
+                <div class="card-header">
+                    <span class="card-title">Battery Impact</span>
+                </div>
+                <div class="card-value" style="font-size: 24px; color: var(--nord13);">1.2% <span
+                        style="font-size: 14px; font-weight: 500; color: var(--nord3);">/ hr</span></div>
+                <div style="margin-top: auto;">
+                    <div style="height: 4px; background: var(--nord2); border-radius: 2px; overflow: hidden;">
+                        <div style="width: 15%; height: 100%; background: var(--nord13);"></div>
+                    </div>
+                    <p style="font-size: 11px; margin: 8px 0 0; color: var(--nord4); opacity: 0.6;">Avg. drain while
+                        driving</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <h2>Recent Journeys</h2>
+            <div style="display: flex; gap: 8px;">
+                <select class="btn" style="padding: 6px 12px;" id="sort-order" onchange="renderList()">
+                    <option value="newest">Newest First</option>
+                    <option value="longest">Longest Distance</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="drive-list" class="drive-list">
+            <!-- Drives will be injected here -->
+        </div>
+
+        <div style="text-align: center; margin-top: 48px;">
+            <button class="btn" style="padding: 12px 32px;" onclick="loadMore()">Load More Records</button>
+        </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div class="modal" id="auth-modal">
+        <div class="modal-content">
+            <h2 style="margin-top: 0;">Welcome Back</h2>
+            <p style="color: var(--nord3); font-size: 14px;">Enter your API key to access your Life247 data.</p>
+            <div class="input-group">
+                <input type="password" id="api-key-input" placeholder="••••••••••••••••">
+            </div>
+            <button class="btn btn-primary" style="width: 100%; padding: 14px;" onclick="saveAuth()">Enter
+                Dashboard</button>
+        </div>
+    </div>
+
+    <!-- Map Modal -->
+    <div class="modal" id="map-modal">
+        <div class="modal-content"
+            style="max-width: 90%; width: 1200px; height: 80vh; padding: 0; overflow: hidden; display: flex; flex-direction: column;">
+            <div
+                style="padding: 20px; border-bottom: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center;">
+                <h3 id="map-modal-title" style="margin: 0;">Journey Map</h3>
+                <button class="btn" onclick="closeMap()">Close</button>
+            </div>
+            <div id="full-map" style="flex: 1;"></div>
+        </div>
+    </div>
+
+    <script>
+        let apiKey = localStorage.getItem('life247_api_key');
+        let allDrives = [];
+        let displayLimit = 9;
+        const mapStyle = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!apiKey) {
+                document.getElementById('auth-modal').style.display = 'flex';
+            } else {
+                loadData();
+            }
+        });
+
+        function saveAuth() {
+            const val = document.getElementById('api-key-input').value;
+            if (val) {
+                apiKey = val;
+                localStorage.setItem('life247_api_key', apiKey);
+                document.getElementById('auth-modal').style.display = 'none';
+                loadData();
+            }
+        }
+
+        async function loadData() {
+            try {
+                const headers = { 'X-API-Key': apiKey };
+                const response = await fetch('/drives?limit=5000', { headers });
+
+                if (response.status === 401) {
+                    apiKey = null;
+                    document.getElementById('auth-modal').style.display = 'flex';
+                    return;
+                }
+
+                allDrives = await response.json();
+                processStats();
+                renderHeatmap();
+                renderCharts();
+                renderList();
+            } catch (err) {
+                console.error('Failed to load data:', err);
+            }
+        }
+
+        function processStats() {
+            const totalMeters = allDrives.reduce((s, d) => s + (d.distanceMeters || 0), 0);
+            const totalMiles = (totalMeters * 0.000621371).toFixed(0);
+            const totalDrives = allDrives.length;
+            const avgSeconds = allDrives.reduce((s, d) => s + (d.durationSeconds || 0), 0) / (totalDrives || 1);
+
+            document.getElementById('stat-distance').innerText = `${parseInt(totalMiles).toLocaleString()} mi`;
+            document.getElementById('stat-drives').innerText = totalDrives.toLocaleString();
+            document.getElementById('stat-duration').innerText = `${Math.round(avgSeconds / 60)}m`;
+        }
+
+        function renderHeatmap() {
+            const container = document.getElementById('heatmap');
+            container.innerHTML = '';
+
+            // Map drives to dates
+            const counts = {};
+            allDrives.forEach(d => {
+                const date = new Date(d.startTime).toISOString().split('T')[0];
+                counts[date] = (counts[date] || 0) + 1;
+            });
+
+            // last 364 days
+            const today = new Date();
+            for (let i = 363; i >= 0; i--) {
+                const d = new Date(today);
+                d.setDate(d.getDate() - i);
+                const ds = d.toISOString().split('T')[0];
+                const count = counts[ds] || 0;
+
+                const cell = document.createElement('div');
+                cell.className = 'heatmap-cell';
+                if (count > 0) {
+                    const level = Math.min(Math.ceil(count / 2), 4);
+                    cell.dataset.level = level;
+                    cell.title = `${ds}: ${count} drives`;
+                }
+                container.appendChild(cell);
+            }
+        }
+
+        let activityChart = null;
+        let intentChart = null;
+
+        function renderCharts() {
+            // Activity Chart (Last 7 Days)
+            const activityCtx = document.getElementById('chart-activity').getContext('2d');
+            if (activityChart) activityChart.destroy();
+
+            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const last7 = [];
+            const labels = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                const ds = d.toISOString().split('T')[0];
+                labels.push(days[d.getDay()]);
+
+                const dayDistance = allDrives
+                    .filter(x => x.startTime.startsWith(ds))
+                    .reduce((s, x) => s + (x.distanceMeters || 0), 0) * 0.000621371;
+                last7.push(dayDistance.toFixed(1));
+            }
+
+            activityChart = new Chart(activityCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Miles',
+                        data: last7,
+                        borderColor: '#88c0d0',
+                        backgroundColor: 'rgba(136, 192, 208, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#88c0d0'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#3b4252', titleColor: '#eceff4', bodyColor: '#eceff4', borderColor: '#4c566a', borderWidth: 1 }
+                    },
+                    scales: {
+                        y: { display: false, beginAtZero: true },
+                        x: { grid: { display: false }, ticks: { color: '#4c566a', font: { size: 10 } } }
+                    }
+                }
+            });
+
+            // Intent Chart
+            const intentCtx = document.getElementById('chart-intent').getContext('2d');
+            if (intentChart) intentChart.destroy();
+
+            const intentCounts = {};
+            allDrives.forEach(d => {
+                const reason = d.startReason || 'Manual';
+                intentCounts[reason] = (intentCounts[reason] || 0) + 1;
+            });
+
+            const sortedIntents = Object.entries(intentCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+            intentChart = new Chart(intentCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: sortedIntents.map(x => x[0]),
+                    datasets: [{
+                        data: sortedIntents.map(x => x[1]),
+                        backgroundColor: ['#88c0d0', '#81a1c1', '#5e81ac', '#4c566a', '#3b4252'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '75%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#3b4252', titleColor: '#eceff4', bodyColor: '#eceff4', borderColor: '#4c566a', borderWidth: 1 }
+                    }
+                }
+            });
+        }
+
+        function renderList() {
+            const container = document.getElementById('drive-list');
+            container.innerHTML = '';
+
+            const sort = document.getElementById('sort-order').value;
+            const list = [...allDrives];
+
+            if (sort === 'newest') {
+                list.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+            } else {
+                list.sort((a, b) => b.distanceMeters - a.distanceMeters);
+            }
+
+            list.slice(0, displayLimit).forEach((drive, index) => {
+                const miles = (drive.distanceMeters * 0.000621371).toFixed(1);
+                const mins = Math.round(drive.durationSeconds / 60);
+                const date = new Date(drive.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const time = new Date(drive.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+                const events = (drive.hardBrakeCount || 0) + (drive.hardAccelCount || 0) + (drive.hardCornerCount || 0);
+                const batteryDrain = drive.batteryLevelAtStart && drive.batteryLevelAtEnd
+                    ? ((drive.batteryLevelAtStart - drive.batteryLevelAtEnd) * 100).toFixed(1)
+                    : null;
+
+                const card = document.createElement('div');
+                card.className = 'drive-card';
+                card.onclick = () => openMap(drive);
+                card.innerHTML = `
+                    <div class="drive-map" id="map-${drive.driveId}"></div>
+                    <div class="drive-info">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <div class="drive-time">${date} <span style="color: var(--nord3); font-weight: 400;">• ${time}</span></div>
+                                <div class="drive-meta">${drive.startReason || 'System Wake'}</div>
+                            </div>
+                            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                                <span class="tag" style="background: ${getScoreColor(drive)}; color: #fff;">${events > 0 ? events + ' Events' : 'Perfect'}</span>
+                                ${batteryDrain ? `<span style="font-size: 10px; color: var(--nord13);">-${batteryDrain}% bat</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="drive-stats">
+                            <div class="stat-item">
+                                <span class="stat-val">${miles}</span>
+                                <span class="stat-lbl">Miles</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-val">${mins}</span>
+                                <span class="stat-lbl">Mins</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-val">${Math.round(drive.maxSpeedMPH || 0)}</span>
+                                <span class="stat-lbl">MPH</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+
+                // Small map render
+                setTimeout(() => {
+                    const el = document.getElementById(`map-${drive.driveId}`);
+                    if (el) {
+                        const m = L.map(el, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false });
+                        L.tileLayer(mapStyle).addTo(m);
+                        const coords = decodePolyline(drive.polyline);
+                        if (coords.length) {
+                            L.polyline(coords, { color: '#88c0d0', weight: 4, opacity: 0.9 }).addTo(m);
+                            m.fitBounds(L.polyline(coords).getBounds(), { padding: [15, 15] });
+                        }
+                    }
+                }, 50);
+            });
+        }
+
+        function getScoreColor(d) {
+            const events = (d.hardBrakeCount || 0) + (d.hardAccelCount || 0) + (d.hardCornerCount || 0);
+            if (events > 2) return '#bf616a';
+            if (events > 0) return '#d08770';
+            return '#4c566a';
+        }
+
+        function loadMore() {
+            displayLimit += 9;
+            renderList();
+        }
+
+        function toggleMap() {
+            alert('Global Map view under construction.');
+        }
+
+        let modalMap = null;
+        function openMap(drive) {
+            document.getElementById('map-modal').style.display = 'flex';
+            document.getElementById('map-modal-title').innerText = `Journey on ${new Date(drive.startTime).toLocaleDateString()}`;
+
+            setTimeout(() => {
+                if (modalMap) modalMap.remove();
+                modalMap = L.map('full-map').setView([0, 0], 13);
+                L.tileLayer(mapStyle).addTo(modalMap);
+                const coords = decodePolyline(drive.polyline);
+                if (coords.length) {
+                    L.polyline(coords, { color: '#88c0d0', weight: 4 }).addTo(modalMap);
+                    modalMap.fitBounds(L.polyline(coords).getBounds());
+                }
+            }, 200);
+        }
+
+        function closeMap() {
+            document.getElementById('map-modal').style.display = 'none';
+        }
+
+        function decodePolyline(str, precision) {
+            let index = 0, lat = 0, lng = 0, coordinates = [], shift = 0, result = 0, byte = null, latitude_change, longitude_change, factor = Math.pow(10, precision || 5);
+            if (!str) return [];
+            while (index < str.length) {
+                byte = null; shift = 0; result = 0;
+                do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+                latitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                shift = result = 0;
+                do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+                longitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                lat += latitude_change; lng += longitude_change;
+                coordinates.push([lat / factor, lng / factor]);
+            }
+            return coordinates;
+        }
+    </script>
+</body>
+
+</html>

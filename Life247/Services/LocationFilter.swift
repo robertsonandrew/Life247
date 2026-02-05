@@ -47,6 +47,10 @@ final class LocationFilter: ObservableObject {
     
     private let logger = Logger(subsystem: "com.life247", category: "LocationFilter")
     
+    /// Throttle for jitter suppression logs (avoid spamming the console)
+    private var lastJitterLogTime: Date = .distantPast
+    private let jitterLogInterval: TimeInterval = 2.0
+    
     // MARK: - Public API
     
     /// Set the downstream event sink
@@ -84,8 +88,12 @@ final class LocationFilter: ObservableObject {
                 
                 if distance < threshold {
                     // Movement is within noise range - suppress jitter
-                    // Still update speed/course if meaningful, but keep position stable
-                    logger.debug("Suppressed jitter (distance: \(String(format: "%.1f", distance))m < threshold: \(String(format: "%.1f", threshold))m)")
+                    // Throttle logs to avoid console spam
+                    let now = Date()
+                    if now.timeIntervalSince(lastJitterLogTime) >= jitterLogInterval {
+                        logger.debug("Suppressed jitter (distance: \(String(format: "%.1f", distance))m < threshold: \(String(format: "%.1f", threshold))m)")
+                        lastJitterLogTime = now
+                    }
                     return
                 }
             }

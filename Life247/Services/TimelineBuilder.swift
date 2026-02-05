@@ -14,6 +14,8 @@ struct TimelineBuilder {
     
     /// Minimum gap duration to consider as a stop (2 minutes)
     static let minimumStopDuration: TimeInterval = 120
+    static let maxInDriveStopDisplacement: CLLocationDistance = 120
+    static let maxInDriveStopEndpointSpeedMPH: Double = 12
     
     /// Build timeline from drives and places.
     /// - Parameters:
@@ -38,6 +40,12 @@ struct TimelineBuilder {
             let maxSpeed = drive.maxSpeedMPH
             let destinationName = destinationName(for: drive, places: places)
             items.append(.drive(drive, trace: drive.tracePointsWithSpeed, maxSpeedMPH: maxSpeed, destinationName: destinationName))
+
+            // Infer one stop segment inside this drive from large stationary gaps.
+            // Appended after the drive so between-drive stop linking remains stable.
+            if let inDriveStop = inferInDriveStop(for: drive, places: places) {
+                items.append(.stop(inDriveStop))
+            }
             
             // Check for stop between this drive and the next (older) one
             if index < sortedDrives.count - 1 {
@@ -124,6 +132,7 @@ struct TimelineBuilder {
         for i in 0..<linkedItems.count - 1 {
             if case .stop(let stop) = linkedItems[i],
                case .drive(let drive, let trace, let maxSpeed, let existingName) = linkedItems[i+1] {
+                   guard stop.source == .betweenDrives else { continue }
                    // Found a Stop followed by a Drive (in array order, meaning Drive -> Stop in time)
                    // Verify? Array index 0 is newest. Index 10 is oldest.
                    // i (Stop S) is newer than i+1 (Drive D).
@@ -139,6 +148,50 @@ struct TimelineBuilder {
         }
         
         return linkedItems
+    }
+
+    /// Infer a stop segment inside a single drive from a long stationary GPS gap.
+    /// Uses the longest candidate gap where endpoints are near each other and low speed.
+    private static func inferInDriveStop(
+        for drive: Drive,
+        places: [Place]
+    ) -> InferredStop? {
+        let points = drive.pointsChronological
+        guard points.count >= 2 else { return nil }
+
+        var bestCandidate: (start: Date, end: Date, location: CLLocationCoordinate2D, gap: TimeInterval)?
+
+        for index in 1..<points.count {
+            let previous = points[index - 1]
+            let current = points[index]
+            let gap = current.timestamp.timeIntervalSince(previous.timestamp)
+            guard gap >= minimumStopDuration else { continue }
+
+            let previousLocation = CLLocation(latitude: previous.latitude, longitude: previous.longitude)
+            let currentLocation = CLLocation(latitude: current.latitude, longitude: current.longitude)
+            let displacement = previousLocation.distance(from: currentLocation)
+            guard displacement <= maxInDriveStopDisplacement else { continue }
+
+            guard previous.speedMPH <= maxInDriveStopEndpointSpeedMPH,
+                  current.speedMPH <= maxInDriveStopEndpointSpeedMPH else { continue }
+
+            if bestCandidate == nil || gap > bestCandidate!.gap {
+                bestCandidate = (previous.timestamp, current.timestamp, previous.coordinate, gap)
+            }
+        }
+
+        guard let candidate = bestCandidate else { return nil }
+        let matchedPlace = findNearestContainingPlace(for: candidate.location, in: places)
+
+        return InferredStop(
+            id: UUID(),
+            location: candidate.location,
+            startTime: candidate.start,
+            endTime: candidate.end,
+            matchedPlace: matchedPlace,
+            address: nil,
+            source: .inDriveGap
+        )
     }
     
     /// Infer a stop between two consecutive drives.
@@ -185,7 +238,8 @@ struct TimelineBuilder {
             startTime: previousEndTime,
             endTime: nextDrive.startTime,
             matchedPlace: matchedPlace,
-            address: nil  // Lazy loaded by view
+            address: nil,  // Lazy loaded by view
+            source: .betweenDrives
         )
     }
     

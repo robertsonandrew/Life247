@@ -62,10 +62,19 @@ Carthage/Build/
 # =================
 # Local Docs / Artifacts
 # =================
-server/
 screenshots/
 CodebaseCritique.md
 CodebaseStructure.md
 ProjectOverview.md
 file_structure.txt
 MyPlan.md
+
+# =================
+# Server (Python backend)
+# =================
+server/.env
+server/.venv/
+server/**/__pycache__/
+server/**/*.pyc
+server/data/*
+!server/data/.gitkeep

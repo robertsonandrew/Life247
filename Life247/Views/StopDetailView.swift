@@ -243,7 +243,8 @@ struct Triangle: Shape {
                 startTime: Date().addingTimeInterval(-3600),
                 endTime: Date().addingTimeInterval(-3000),
                 matchedPlace: nil,
-                address: "15060 S Grant St"
+                address: "15060 S Grant St",
+                source: .betweenDrives
             ),
             frequentStopInfo: FrequentStopCandidate(
                 coordinate: .init(latitude: 36.0, longitude: -95.9),

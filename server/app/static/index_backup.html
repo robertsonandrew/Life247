@@ -1,0 +1,2549 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Life247 Drives</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Masonry JS -->
+    <script src="https://unpkg.com/masonry-layout@4/dist/masonry.pkgd.min.js"></script>
+
+    <style>
+        :root {
+            /* Premium Dark Theme - Midnight (Lighter contrast) */
+            --bg-color: #161618;
+            --text-primary: #ffffff;
+            --text-secondary: #aeaeb2;
+            --text-tertiary: #636366;
+
+            --card-bg: rgba(30, 30, 32, 0.75);
+            --card-hover: rgba(44, 44, 46, 0.8);
+            --border-color: rgba(255, 255, 255, 0.1);
+
+            /* Glassmorphism */
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-blur: blur(20px);
+            --glass-border: rgba(255, 255, 255, 0.08);
+
+            /* Accents - Vibrant Silicon Valley Style */
+            --accent-primary: #0071e3;
+            /* Apple Blue */
+            --accent-success: #34c759;
+            /* Apple Green */
+            --accent-warning: #ff9f0a;
+            /* Apple Orange */
+            --accent-danger: #ff3b30;
+            /* Apple Red */
+            --accent-purple: #af52de;
+            /* Apple Purple */
+
+            --radius-sm: 10px;
+            --radius-md: 16px;
+            --radius-lg: 24px;
+
+            --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        [data-theme="light"] {
+            --bg-color: #f2f2f7;
+            /* System Gray 6 */
+            --text-primary: #000000;
+            --text-secondary: #6e6e73;
+            --text-tertiary: #aeaeb2;
+
+            --card-bg: #ffffff;
+            --card-hover: #f1f1f5;
+            --border-color: #e5e5ea;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            padding-bottom: 60px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        /* --- Typography --- */
+        h1 {
+            font-size: 34px;
+            font-weight: 700;
+            letter-spacing: -0.8px;
+            margin-bottom: 4px;
+        }
+
+        h2 {
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            margin: 40px 0 20px;
+            color: var(--text-primary);
+        }
+
+        h3 {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            letter-spacing: 0.5px;
+        }
+
+        .subtitle {
+            font-size: 17px;
+            color: var(--text-secondary);
+            font-weight: 400;
+            letter-spacing: -0.3px;
+        }
+
+        /* --- Header & Layout --- */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 50px;
+            padding: 20px 0;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .header-chips {
+            display: flex;
+            gap: 8px;
+            margin-left: 20px;
+        }
+
+        .chip {
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            padding: 6px 14px;
+            border-radius: 100px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .chip .val {
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* --- Buttons --- */
+        .btn {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: var(--card-hover);
+            border-color: var(--text-secondary);
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background: var(--text-primary);
+            color: var(--bg-color);
+            border: 1px solid var(--text-primary);
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            background: var(--text-primary);
+        }
+
+        /* --- Cards & Layout --- */
+        /* --- Bento Grid Dashboard --- */
+        .grid-dashboard {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: auto auto;
+            gap: 24px;
+            margin-bottom: 60px;
+            grid-template-areas:
+                "overview overview weekly weekly"
+                "behavior quality records reasons";
+        }
+
+        @media (max-width: 1200px) {
+            .grid-dashboard {
+                grid-template-columns: repeat(2, 1fr);
+                grid-template-areas:
+                    "overview overview"
+                    "weekly weekly"
+                    "behavior quality"
+                    "records reasons";
+            }
+        }
+
+        @media (max-width: 768px) {
+            .grid-dashboard {
+                grid-template-columns: 1fr;
+                grid-template-areas:
+                    "overview"
+                    "weekly"
+                    "behavior"
+                    "quality"
+                    "records"
+                    "reasons";
+            }
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: var(--radius-lg);
+            padding: 28px;
+            border: 1px solid var(--border-color);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            background: var(--card-hover);
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 100%);
+            pointer-events: none;
+        }
+
+        .area-overview {
+            grid-area: overview;
+        }
+
+        .area-weekly {
+            grid-area: weekly;
+        }
+
+        .area-reasons {
+            grid-area: reasons;
+        }
+
+        .area-records {
+            grid-area: records;
+        }
+
+        .area-quality {
+            grid-area: quality;
+        }
+
+        .area-behavior {
+            grid-area: behavior;
+        }
+
+        /* --- Overview Stats --- */
+        .overview-row {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 6px;
+        }
+
+        .stat-item {
+            text-align: left;
+        }
+
+        .stat-item .value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -1px;
+        }
+
+        .stat-item .unit {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            display: block;
+            margin-top: 2px;
+        }
+
+        /* --- Charts --- */
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 180px;
+        }
+
+        /* --- Heatmap --- */
+        .heatmap-scroll {
+            overflow-x: auto;
+            padding-bottom: 12px;
+        }
+
+        .heatmap-grid {
+            display: grid;
+            grid-template-rows: repeat(7, 1fr);
+            grid-auto-flow: column;
+            gap: 4px;
+            min-width: max-content;
+        }
+
+        .day-cell {
+            width: 11px;
+            height: 11px;
+            border-radius: 2px;
+            background: var(--card-hover);
+        }
+
+        .day-cell[data-l="1"] {
+            background: #0e4429;
+        }
+
+        .day-cell[data-l="2"] {
+            background: #006d32;
+        }
+
+        .day-cell[data-l="3"] {
+            background: #26a641;
+        }
+
+        .day-cell[data-l="4"] {
+            background: #39d353;
+        }
+
+        [data-theme="light"] .day-cell[data-l="1"] {
+            background: #9be9a8;
+        }
+
+        [data-theme="light"] .day-cell[data-l="2"] {
+            background: #40c463;
+        }
+
+        [data-theme="light"] .day-cell[data-l="3"] {
+            background: #30a14e;
+        }
+
+        [data-theme="light"] .day-cell[data-l="4"] {
+            background: #216e39;
+        }
+
+        /* --- Drive Card (Masonry Item) --- */
+        .grid-item {
+            width: calc(25% - 18px);
+            /* 4 columns */
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 1400px) {
+            .grid-item {
+                width: calc(33.333% - 16px);
+            }
+        }
+
+        /* 3 columns */
+        @media (max-width: 1000px) {
+            .grid-item {
+                width: calc(50% - 12px);
+            }
+        }
+
+        /* 2 columns */
+        @media (max-width: 650px) {
+            .grid-item {
+                width: 100%;
+            }
+        }
+
+        /* 1 column */
+
+        .drive-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .drive-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+            border-color: var(--text-secondary);
+        }
+
+        .drive-minimap {
+            width: 100%;
+            height: 140px;
+            background: #101010;
+            position: relative;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .drive-content {
+            padding: 16px;
+        }
+
+        .drive-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .drive-date {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: -0.3px;
+        }
+
+        .drive-timestamp {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .tag-pill {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 100px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            display: inline-block;
+        }
+
+        .tag-blue {
+            background: rgba(10, 132, 255, 0.15);
+            color: var(--accent-primary);
+        }
+
+        .tag-green {
+            background: rgba(48, 209, 88, 0.15);
+            color: var(--accent-success);
+        }
+
+        .tag-gray {
+            background: rgba(142, 142, 147, 0.15);
+            color: var(--text-secondary);
+        }
+
+        .drive-stats-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .ds-item {
+            text-align: center;
+            flex: 1;
+        }
+
+        .ds-item:not(:last-child) {
+            border-right: 1px solid var(--border-color);
+        }
+
+        .ds-item .lbl {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .ds-item .val {
+            font-size: 16px;
+            color: var(--text-primary);
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            margin-bottom: 2px;
+        }
+
+        /* G-Force Badges */
+        .gforce-badges {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .gf-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 100px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .gf-badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .gf-brake {
+            background: rgba(255, 69, 58, 0.15);
+            color: #ff453a;
+        }
+
+        .gf-brake::before {
+            background: #ff453a;
+        }
+
+        .gf-accel {
+            background: rgba(255, 159, 10, 0.15);
+            color: #ff9f0a;
+        }
+
+        .gf-accel::before {
+            background: #ff9f0a;
+        }
+
+        .gf-corner {
+            background: rgba(255, 214, 10, 0.15);
+            color: #ffd60a;
+        }
+
+        .gf-corner::before {
+            background: #ffd60a;
+        }
+
+        /* --- Expandable Nerdy Details --- */
+        .nerdy-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 10px;
+            padding: 8px;
+            border-top: 1px solid var(--border-color);
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: color 0.2s;
+        }
+
+        .nerdy-toggle:hover {
+            color: var(--accent-primary);
+        }
+
+        .nerdy-toggle svg {
+            width: 12px;
+            height: 12px;
+            transition: transform 0.2s;
+        }
+
+        .nerdy-toggle.expanded svg {
+            transform: rotate(180deg);
+        }
+
+        .nerdy-details {
+            display: none;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-top: 1px solid var(--border-color);
+            font-size: 11px;
+        }
+
+        .nerdy-details.show {
+            display: block;
+        }
+
+        .nerdy-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .nerdy-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .nerdy-item .n-label {
+            font-size: 9px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+
+        .nerdy-item .n-value {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .nerdy-item.full-width {
+            grid-column: span 2;
+        }
+
+        .nerdy-item .n-value.mono {
+            font-family: 'SF Mono', 'Menlo', monospace;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .nerdy-item .n-value.good {
+            color: var(--accent-success);
+        }
+
+        .nerdy-item .n-value.warn {
+            color: var(--accent-warning);
+        }
+
+        .nerdy-item .n-value.bad {
+            color: var(--accent-danger);
+        }
+
+
+        /* --- Records Card --- */
+        .record-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .record-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--card-hover);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 16px;
+            font-size: 20px;
+        }
+
+        .record-info h4 {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .record-info div {
+            font-size: 18px;
+            color: var(--text-primary);
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+
+        .record-date {
+            font-size: 12px !important;
+            color: var(--text-tertiary) !important;
+            font-weight: 400 !important;
+            margin-top: 2px;
+        }
+
+        /* --- Filters --- */
+        .filters-bar {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+            margin-bottom: 24px;
+            align-items: center;
+        }
+
+        .filter-input {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .filter-input:focus {
+            border-color: var(--accent-primary);
+        }
+
+        /* --- Modal --- */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-window {
+            width: 90%;
+            max-width: 1100px;
+            height: 85vh;
+            background: var(--bg-color);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 40px 80px rgba(0, 0, 0, 0.6);
+        }
+
+        .modal-top {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--card-bg);
+        }
+
+        .map-full {
+            flex: 1;
+            background: #000;
+            position: relative;
+        }
+
+        #map-leaflet {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* --- Auth --- */
+        .auth-overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--bg-color);
+            z-index: 2000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .auth-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 40px;
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .auth-input {
+            width: 100%;
+            margin: 24px 0;
+            padding: 12px;
+            border-radius: 10px;
+            background: #000;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .auth-input:focus {
+            border-color: var(--accent-primary);
+        }
+
+        /* --- Timeline Log --- */
+        .timeline-log {
+            font-family: 'SF Mono', 'Menlo', monospace;
+            font-size: 10px;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            display: flex;
+            gap: 8px;
+            padding: 2px 0;
+        }
+
+        .log-entry.start .log-msg {
+            color: var(--accent-success);
+            font-weight: 500;
+        }
+
+        .log-entry.end .log-msg {
+            color: var(--accent-danger);
+            font-weight: 500;
+        }
+
+        .log-entry.info .log-msg {
+            color: var(--text-secondary);
+        }
+
+        .log-entry.highlight .log-msg {
+            color: var(--accent-warning);
+        }
+
+        .log-entry.critical .log-msg {
+            color: var(--accent-danger);
+            font-weight: 600;
+        }
+
+        .log-entry.warning .log-msg {
+            color: var(--accent-warning);
+            opacity: 0.8;
+        }
+
+        .log-entry.summary {
+            border-top: 1px solid var(--border-color);
+            margin-top: 4px;
+            padding-top: 6px;
+        }
+
+        .log-entry.summary .log-msg {
+            color: var(--text-tertiary);
+            font-style: italic;
+        }
+
+        .log-time {
+            color: var(--text-tertiary);
+            min-width: 70px;
+            font-family: 'SF Mono', 'Menlo', monospace;
+            font-size: 10px;
+        }
+
+        .log-msg {
+            color: var(--text-primary);
+        }
+
+        .log-msg.highlight {
+            color: var(--accent-warning);
+        }
+
+        .log-msg.critical {
+            color: var(--accent-danger);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Auth Modal -->
+    <div id="auth-view" class="auth-overlay">
+        <div class="auth-card">
+            <div style="font-size: 40px; margin-bottom: 16px;">🔐</div>
+            <h2>Welcome Back</h2>
+            <p class="subtitle" style="margin-bottom: 0;">Enter your API Key to access drives.</p>
+
+            <input type="password" id="api-key-input" class="auth-input" placeholder="Paste API Key...">
+
+            <button class="btn btn-primary" onclick="saveAuth()"
+                style="width: 100%; justify-content: center; padding: 12px;">Connect</button>
+        </div>
+    </div>
+
+    <div class="container" id="dashboard-container">
+        <header>
+            <div class="header-left">
+                <div>
+                    <h1>Life247</h1>
+                    <div class="subtitle">Personal Intelligence Dashboard</div>
+                </div>
+                <div class="header-chips">
+                    <div class="chip">
+                        <span>Drives</span>
+                        <span class="val" id="chip-drives">-</span>
+                    </div>
+                    <div class="chip">
+                        <span>Total Miles</span>
+                        <span class="val" id="chip-miles">-</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-controls">
+                <button class="btn" onclick="cycleMapStyle()" id="map-style-btn">🗺️ Dark Maps</button>
+                <button class="btn" onclick="openGlobalMap()">🌍 Map All</button>
+                <button class="btn" onclick="toggleTheme()">Appearance</button>
+            </div>
+        </header>
+
+        <!-- Analytics Section -->
+        <div id="stats-section" class="grid-dashboard">
+            <!-- 1. Overview Cards -->
+            <div class="card area-overview">
+                <h3>System Overview</h3>
+                <div class="overview-row">
+                    <div class="stat-item">
+                        <span class="value" id="stat-drives">-</span>
+                        <span class="unit">Trips</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="value" id="stat-miles">-</span>
+                        <span class="unit">Miles</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="value" id="stat-hours">-</span>
+                        <span class="unit">Hours</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="value" style="color: var(--accent-success);" id="stat-score">98</span>
+                        <span class="unit">Driver Score</span>
+                    </div>
+                </div>
+                <div style="margin-top: auto; padding-top: 32px;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                        <h3>Activity Heatmap</h3>
+                        <span style="font-size: 10px; color: var(--text-tertiary);">Consistency Index: High</span>
+                    </div>
+                    <div class="heatmap-scroll">
+                        <div id="heatmap-grid" class="heatmap-grid"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Weekly Activity -->
+            <div class="card area-weekly">
+                <div style="display:flex; justify-content: space-between;">
+                    <h3>Weekly Volume</h3>
+                    <span id="weekly-trend" style="font-size: 12px; color: var(--accent-success); font-weight: 600;">↑
+                        12%</span>
+                </div>
+                <div class="chart-container" style="height: 220px;">
+                    <canvas id="weeklyChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 3. Start Reasons -->
+            <div class="card area-reasons">
+                <h3>Trip Intent</h3>
+                <div class="chart-container" style="height: 200px;">
+                    <canvas id="reasonsChart"></canvas>
+                </div>
+                <div id="reasons-legend" style="margin-top: 10px;"></div>
+            </div>
+
+            <!-- 4. Records -->
+            <div class="card area-records">
+                <h3>Personal Records</h3>
+
+                <div class="record-row">
+                    <div class="record-icon" style="background: rgba(0, 113, 227, 0.1); color: var(--accent-primary);">
+                        📏</div>
+                    <div class="record-info">
+                        <h4>Longest Distance</h4>
+                        <div id="rec-dist-val">-</div>
+                        <div class="record-date" id="rec-dist-date">-</div>
+                    </div>
+                </div>
+
+                <div class="record-row">
+                    <div class="record-icon" style="background: rgba(175, 82, 222, 0.1); color: var(--accent-purple);">
+                        ⏱️</div>
+                    <div class="record-info">
+                        <h4>Extreme Duration</h4>
+                        <div id="rec-dur-val">-</div>
+                        <div class="record-date" id="rec-dur-date">-</div>
+                    </div>
+                </div>
+
+                <div class="record-row" style="margin-bottom: 0;">
+                    <div class="record-icon" style="background: rgba(255, 159, 10, 0.1); color: var(--accent-warning);">
+                        ⚡️</div>
+                    <div class="record-info">
+                        <h4>Peak Velocity</h4>
+                        <div id="rec-spd-val">-</div>
+                        <div class="record-date" id="rec-spd-date">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. Quality Metrics -->
+            <div class="card area-quality">
+                <div style="display: flex; justify-content: space-between;">
+                    <h3>System Health</h3>
+                    <span id="health-indicator"
+                        style="width: 8px; height: 8px; border-radius: 50%; background: var(--accent-success);"></span>
+                </div>
+                <div class="overview-row" style="margin-bottom: 20px; flex-wrap: wrap;">
+                    <div class="stat-item" style="flex: 1; min-width: 50%;">
+                        <span class="value" style="font-size: 24px;" id="stat-avg-latency">-</span>
+                        <span class="unit">Latency (ms)</span>
+                    </div>
+                    <div class="stat-item" style="flex: 1; min-width: 50%;">
+                        <span class="value" style="font-size: 24px;" id="stat-sample-rate">-</span>
+                        <span class="unit">Capture Rate</span>
+                    </div>
+                </div>
+
+                <div class="record-row" style="margin-bottom: 12px;">
+                    <div class="record-icon" style="font-size: 16px; width: 32px; height: 32px;">📡</div>
+                    <div class="record-info">
+                        <h4 style="font-size: 10px;">GPS Precision</h4>
+                        <div id="qm-gps-health" style="font-size: 14px;">-</div>
+                    </div>
+                </div>
+
+                <div class="record-row" style="margin-bottom: 0;">
+                    <div class="record-icon" style="font-size: 16px; width: 32px; height: 32px;">🔋</div>
+                    <div class="record-info">
+                        <h4 style="font-size: 10px;">Battery Impact</h4>
+                        <div id="qm-battery-drain" style="font-size: 14px;">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 6. G-Force Events -->
+            <div class="card area-behavior">
+                <h3>Safety Profile</h3>
+                <div class="overview-row" style="margin-bottom: 15px;">
+                    <div class="stat-item">
+                        <span class="value" style="font-size: 28px;" id="stat-total-events">-</span>
+                        <span class="unit">Incidents</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="value" style="font-size: 28px;" id="stat-max-g">-</span>
+                        <span class="unit">Max G</span>
+                    </div>
+                </div>
+
+                <div class="record-row" style="margin-bottom: 8px;">
+                    <div class="record-icon"
+                        style="width: 12px; height: 12px; color: var(--accent-danger); background: none;">●</div>
+                    <div class="record-info"
+                        style="display:flex; justify-content: space-between; width: 100%; align-items: center;">
+                        <h4 style="margin:0;">Hard Brakes</h4>
+                        <div id="gf-brakes" style="font-weight: 700; font-size: 14px;">-</div>
+                    </div>
+                </div>
+
+                <div class="record-row" style="margin-bottom: 8px;">
+                    <div class="record-icon"
+                        style="width: 12px; height: 12px; color: var(--accent-warning); background: none;">●</div>
+                    <div class="record-info"
+                        style="display:flex; justify-content: space-between; width: 100%; align-items: center;">
+                        <h4 style="margin:0;">Hard Accel</h4>
+                        <div id="gf-accels" style="font-weight: 700; font-size: 14px;">-</div>
+                    </div>
+                </div>
+
+                <div class="record-row" style="margin-bottom: 0;">
+                    <div class="record-icon"
+                        style="width: 12px; height: 12px; color: var(--accent-purple); background: none;">●</div>
+                    <div class="record-info"
+                        style="display:flex; justify-content: space-between; width: 100%; align-items: center;">
+                        <h4 style="margin:0;">Hard Corner</h4>
+                        <div id="gf-corners" style="font-weight: 700; font-size: 14px;">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Saved Places Section -->
+        <div style="margin-bottom: 40px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0;">📍 Saved Places</h2>
+                <button class="btn" onclick="togglePlacesSection()" id="places-toggle-btn">Show</button>
+            </div>
+            <div id="places-section" style="display: none;">
+                <div style="display: grid; grid-template-columns: 1fr 300px; gap: 24px;">
+                    <!-- Places Map -->
+                    <div class="card" style="padding: 0; overflow: hidden; min-height: 400px;">
+                        <div id="places-map" style="width: 100%; height: 400px;"></div>
+                    </div>
+                    <!-- Places List -->
+                    <div class="card" style="max-height: 400px; overflow-y: auto;">
+                        <h3>Geofences</h3>
+                        <div id="places-list" style="display: flex; flex-direction: column; gap: 12px;">
+                            <div style="color: var(--text-secondary); font-size: 13px;">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="filters-bar">
+        <input type="text" id="search-input" class="filter-input" placeholder="Search location, notes..."
+            onkeyup="handleFilter()" style="min-width: 250px;">
+        <input type="date" id="date-start" class="filter-input" onchange="handleFilter()">
+        <select id="sort-select" class="filter-input" onchange="handleFilter()">
+            <option value="newest">Newest First</option>
+            <option value="longest">Longest Distance</option>
+            <option value="duration">Longest Duration</option>
+        </select>
+        <div style="flex:1;"></div>
+        <div id="count-label"
+            style="align-self: center; font-size: 13px; color: var(--text-secondary); font-weight: 500;">Loading...
+        </div>
+    </div>
+
+    <!-- MASONRY GRID -->
+    <!-- We add a 'grid-sizer' for Masonry if needed, but usually just item selector works -->
+    <div id="drives-grid" class="drives-masonry">
+        <!-- Items injected via JS -->
+    </div>
+
+    <!-- Load More -->
+    <div style="text-align: center; margin: 60px 0;">
+        <button id="load-more-btn" class="btn" style="display:none; margin: 0 auto; padding: 12px 32px;" </div>
+
+    </div>
+
+    </div>
+
+    <!-- Generic Modal -->
+    <div id="main-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-top">
+                <h3 id="modal-title" style="margin:0; color: var(--text-primary); font-size: 16px;">Details</h3>
+                <button class="btn" onclick="closeModal()">Close</button>
+            </div>
+            <div class="map-full">
+                <div id="map-leaflet"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Config & State ---
+        let apiKey = localStorage.getItem('life247_api_key') || '';
+        let allDrives = [];
+        let displayedDrives = [];
+        let masonryInstance = null;
+        let limit = 20; // Pagination limit
+
+        // Map style configuration
+        // Map style configuration
+        const mapStyles = [
+            { name: 'Midnight', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', attribution: 'Esri' },
+            { name: 'Deep Space', url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attribution: '&copy; CARTO' },
+            { name: 'Light', url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', attribution: '&copy; CARTO' },
+            { name: 'Satellite', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: '&copy; Esri' }
+        ];
+        let currentMapStyleIndex = parseInt(localStorage.getItem('life247_map_style') || '0');
+        let globalMapLayer = null;
+        let modalMapLayer = null;
+
+        function getCurrentMapStyle() {
+            return mapStyles[currentMapStyleIndex];
+        }
+
+        function cycleMapStyle() {
+            currentMapStyleIndex = (currentMapStyleIndex + 1) % mapStyles.length;
+            localStorage.setItem('life247_map_style', currentMapStyleIndex);
+            const style = getCurrentMapStyle();
+            document.getElementById('map-style-btn').textContent = '🗺️ ' + style.name + ' Maps';
+
+            // Update global map layer if it exists
+            if (globalMapLayer && window.globalMap) {
+                window.globalMap.removeLayer(globalMapLayer);
+                globalMapLayer = L.tileLayer(style.url, { attribution: style.attribution });
+                globalMapLayer.addTo(window.globalMap);
+            }
+
+            // Update modal map layer if it exists
+            if (modalMapLayer && mapInst) {
+                mapInst.removeLayer(modalMapLayer);
+                modalMapLayer = L.tileLayer(style.url, { attribution: style.attribution });
+                modalMapLayer.addTo(mapInst);
+            }
+
+            // Re-render cards to update minimaps
+            renderDriveCards();
+        }
+
+        // --- Init ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set initial map style button text
+            const style = getCurrentMapStyle();
+            document.getElementById('map-style-btn').textContent = '🗺️ ' + style.name + ' Maps';
+
+            if (!apiKey) {
+                showAuth();
+            } else {
+                loadData();
+            }
+        });
+
+        function showAuth() {
+            document.getElementById('auth-view').style.display = 'flex';
+            document.getElementById('dashboard-container').style.filter = 'blur(10px)';
+        }
+
+        function saveAuth() {
+            const val = document.getElementById('api-key-input').value.trim();
+            if (val) {
+                apiKey = val;
+                localStorage.setItem('life247_api_key', apiKey);
+                document.getElementById('auth-view').style.display = 'none';
+                document.getElementById('dashboard-container').style.filter = 'none';
+                loadData();
+            }
+        }
+
+        async function loadData() {
+            try {
+                const headers = {};
+                if (apiKey) headers['X-API-Key'] = apiKey;
+
+                const res = await fetch('/drives?limit=5000', { headers }); // Fetch all for manual client-side prowess
+
+                if (res.status === 401) {
+                    // Invalid key
+                    localStorage.removeItem('life247_api_key');
+                    apiKey = '';
+                    showAuth();
+                    return;
+                }
+
+                if (!res.ok) throw new Error("Failed to fetch");
+
+                allDrives = await res.json();
+
+                // Sort by default (Newest)
+                allDrives.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+
+                // Render Analytics
+                renderAnalytics(allDrives);
+
+                // Render List
+                handleFilter();
+
+            } catch (e) {
+                console.error(e);
+                document.getElementById('count-label').innerText = "Error loading data.";
+            }
+        }
+
+        // --- Analytics Logic ---
+        function renderAnalytics(drives) {
+            // 1. Overview
+            const totalMiles = drives.reduce((a, d) => a + (d.distanceMeters || 0), 0) * 0.000621371;
+            const totalSecs = drives.reduce((a, d) => a + (d.durationSeconds || 0), 0);
+
+            document.getElementById('stat-drives').innerText = drives.length.toLocaleString();
+            document.getElementById('stat-miles').innerText = Math.round(totalMiles).toLocaleString();
+            document.getElementById('stat-hours').innerText = Math.round(totalSecs / 3600).toLocaleString();
+
+            // Header Chips
+            document.getElementById('chip-drives').innerText = drives.length.toLocaleString();
+            document.getElementById('chip-miles').innerText = Math.round(totalMiles).toLocaleString();
+
+            // Driver Score Calculation
+            const totalBrakes = drives.reduce((a, d) => a + (d.hardBrakeCount || 0), 0);
+            const totalAccels = drives.reduce((a, d) => a + (d.hardAccelCount || 0), 0);
+            const totalCorners = drives.reduce((a, d) => a + (d.hardCornerCount || 0), 0);
+            const totalEvents = totalBrakes + totalAccels + totalCorners;
+
+            // Deduct 2 points per event per 10 miles (arbitrary but plausible)
+            let score = 100;
+            if (totalMiles > 0) {
+                const deduction = (totalEvents / totalMiles) * 10;
+                score = Math.max(0, Math.min(100, 100 - deduction));
+            }
+            const scoreEl = document.getElementById('stat-score');
+            scoreEl.innerText = Math.round(score);
+            if (score > 90) scoreEl.style.color = 'var(--accent-success)';
+            else if (score > 70) scoreEl.style.color = 'var(--accent-warning)';
+            else scoreEl.style.color = 'var(--accent-danger)';
+
+            // 2. Heatmap
+            renderHeatmap(drives);
+
+            // 3. Weekly Chart & Trend
+            renderWeeklyChart(drives);
+
+            // Calculate Trend (This week vs Last week)
+            const msInWeek = 7 * 24 * 60 * 60 * 1000;
+            const now = new Date();
+            const thisWeekStart = new Date(now.getTime() - (now.getDay() * 24 * 60 * 60 * 1000));
+            thisWeekStart.setHours(0, 0, 0, 0);
+            const lastWeekStart = new Date(thisWeekStart.getTime() - msInWeek);
+
+            const thisWeekMiles = drives
+                .filter(d => new Date(d.startTime) >= thisWeekStart)
+                .reduce((a, d) => a + (d.distanceMeters * 0.000621371), 0);
+            const lastWeekMiles = drives
+                .filter(d => {
+                    const dt = new Date(d.startTime);
+                    return dt >= lastWeekStart && dt < thisWeekStart;
+                })
+                .reduce((a, d) => a + (d.distanceMeters * 0.000621371), 0);
+
+            const trendEl = document.getElementById('weekly-trend');
+            if (trendEl && lastWeekMiles > 0) {
+                const diff = ((thisWeekMiles - lastWeekMiles) / lastWeekMiles) * 100;
+                const sign = diff >= 0 ? '↑' : '↓';
+                trendEl.innerText = `${sign} ${Math.abs(Math.round(diff))}%`;
+                trendEl.style.color = diff >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+            } else if (trendEl) {
+                trendEl.innerText = '--';
+            }
+
+            // 4. Start Reasons Chart
+            renderReasonChart(drives);
+
+            // 5. Records
+            renderRecords(drives);
+
+            // 6. Quality Metrics (NEW)
+            renderQualityMetrics(drives);
+
+            // 7. G-Force / Driving Behavior
+            renderGForceMetrics(drives);
+        }
+
+        function renderQualityMetrics(drives) {
+            if (!drives.length) return;
+
+            const withMetrics = drives.filter(d => d.detectionLatencyMs != null);
+            if (withMetrics.length === 0) {
+                const ids = ['stat-avg-latency', 'stat-sample-rate', 'qm-gps-health', 'qm-battery-drain', 'qm-lpm-count', 'qm-gps-detail', 'qm-battery-detail', 'health-indicator'];
+                ids.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) {
+                        if (id === 'qm-lpm-count') el.innerText = '0';
+                        else if (id === 'health-indicator') el.style.background = 'var(--accent-danger)';
+                        else el.innerText = 'N/A';
+                    }
+                });
+                return;
+            }
+
+            // Average detection latency
+            const latencies = withMetrics.map(d => d.detectionLatencyMs).filter(l => l != null && l > 0);
+            const avgLatency = latencies.length > 0
+                ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+                : null;
+            const statAvgLatencyEl = document.getElementById('stat-avg-latency');
+            if (statAvgLatencyEl) statAvgLatencyEl.innerText = avgLatency != null ? avgLatency : 'N/A';
+
+            // Sample acceptance rate
+            const totalSamples = withMetrics.reduce((a, d) => a + (d.locationSampleCount || 0), 0);
+            const droppedSamples = withMetrics.reduce((a, d) => a + (d.droppedSampleCount || 0), 0);
+            const acceptanceRate = totalSamples > 0
+                ? Math.round((totalSamples / (totalSamples + droppedSamples)) * 100)
+                : 100;
+            const statSampleRateEl = document.getElementById('stat-sample-rate');
+            if (statSampleRateEl) statSampleRateEl.innerText = acceptanceRate + '%';
+
+            // GPS Health
+            const gaps = withMetrics.map(d => d.maxGapBetweenSamplesMs).filter(g => g != null && g > 0);
+            const qmGpsHealthEl = document.getElementById('qm-gps-health');
+            const qmGpsDetailEl = document.getElementById('qm-gps-detail');
+            if (gaps.length > 0) {
+                const avgGap = Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length / 1000);
+                const maxGap = Math.round(Math.max(...gaps) / 1000);
+                if (qmGpsHealthEl) qmGpsHealthEl.innerText = avgGap < 10 ? 'Excellent' : avgGap < 30 ? 'Good' : 'Fair';
+                if (qmGpsDetailEl) qmGpsDetailEl.innerText = `Avg gap: ${avgGap}s, Max: ${maxGap}s`;
+            } else {
+                if (qmGpsHealthEl) qmGpsHealthEl.innerText = 'Excellent';
+                if (qmGpsDetailEl) qmGpsDetailEl.innerText = 'No significant gaps detected';
+            }
+
+            // Battery drain
+            const batteryDrains = withMetrics
+                .filter(d => d.batteryLevelAtStart != null && d.batteryLevelAtEnd != null && d.batteryLevelAtStart > 0)
+                .map(d => {
+                    const drain = (d.batteryLevelAtStart - d.batteryLevelAtEnd) * 100;
+                    const durationHrs = (d.durationSeconds || 1) / 3600; // Prevent division by zero
+                    return durationHrs > 0 ? drain / durationHrs : 0; // drain per hour
+                })
+                .filter(d => d >= 0 && d < 50); // filter unreasonable values
+
+            const qmBatteryDrainEl = document.getElementById('qm-battery-drain');
+            const qmBatteryDetailEl = document.getElementById('qm-battery-detail');
+            if (batteryDrains.length > 0) {
+                const avgDrain = (batteryDrains.reduce((a, b) => a + b, 0) / batteryDrains.length).toFixed(1);
+                if (qmBatteryDrainEl) qmBatteryDrainEl.innerText = avgDrain + '%/hr';
+                if (qmBatteryDetailEl) qmBatteryDetailEl.innerText = `Based on ${batteryDrains.length} drives`;
+            } else {
+                if (qmBatteryDrainEl) qmBatteryDrainEl.innerText = 'N/A';
+                if (qmBatteryDetailEl) qmBatteryDetailEl.innerText = 'Insufficient data';
+            }
+
+            // Low Power Mode count
+            const lpmCount = withMetrics.filter(d => d.lowPowerModeAtStart === true).length;
+            const qmLpmCountEl = document.getElementById('qm-lpm-count');
+            if (qmLpmCountEl) qmLpmCountEl.innerText = lpmCount + ' / ' + withMetrics.length;
+
+            // Health indicator color
+            const healthInd = document.getElementById('health-indicator');
+            if (healthInd) {
+                if (acceptanceRate > 90 && (avgLatency || 0) < 5000) {
+                    healthInd.style.background = 'var(--accent-success)';
+                } else if (acceptanceRate > 70) {
+                    healthInd.style.background = 'var(--accent-warning)';
+                } else {
+                    healthInd.style.background = 'var(--accent-danger)';
+                }
+            }
+        }
+
+        function renderGForceMetrics(drives) {
+            if (!drives.length) {
+                document.getElementById('stat-total-events').innerText = '-';
+                document.getElementById('stat-max-g').innerText = '-';
+                document.getElementById('gf-brakes').innerText = '-';
+                document.getElementById('gf-accels').innerText = '-';
+                document.getElementById('gf-corners').innerText = '-';
+                return;
+            }
+
+            // Aggregate counts across all drives
+            const totalBrakes = drives.reduce((a, d) => a + (d.hardBrakeCount || 0), 0);
+            const totalAccels = drives.reduce((a, d) => a + (d.hardAccelCount || 0), 0);
+            const totalCorners = drives.reduce((a, d) => a + (d.hardCornerCount || 0), 0);
+            const totalEvents = totalBrakes + totalAccels + totalCorners;
+
+            // Find max G-force across all drives
+            const maxGs = drives.map(d => d.maxGForce || 0).filter(g => g > 0);
+            const maxG = maxGs.length > 0 ? Math.max(...maxGs).toFixed(2) : '-';
+
+            document.getElementById('stat-total-events').innerText = totalEvents.toLocaleString();
+            document.getElementById('stat-max-g').innerText = maxG !== '-' ? maxG + 'g' : '-';
+            document.getElementById('gf-brakes').innerText = totalBrakes.toLocaleString();
+            document.getElementById('gf-accels').innerText = totalAccels.toLocaleString();
+            document.getElementById('gf-corners').innerText = totalCorners.toLocaleString();
+        }
+
+        function renderRecords(drives) {
+            if (!drives.length) return;
+
+            // Find maxes
+            const maxDist = drives.reduce((p, c) => (p.distanceMeters > c.distanceMeters ? p : c));
+            const maxDur = drives.reduce((p, c) => (p.durationSeconds > c.durationSeconds ? p : c));
+            const maxSpd = drives.reduce((p, c) => (p.maxSpeedMPH > c.maxSpeedMPH ? p : c));
+
+            // Render
+            const fmtDate = (d) => new Date(d).toLocaleDateString();
+
+            // Distance
+            document.getElementById('rec-dist-val').innerText = `${(maxDist.distanceMeters * 0.000621371).toFixed(1)} miles`;
+            document.getElementById('rec-dist-date').innerText = fmtDate(maxDist.startTime);
+
+            // Duration
+            const h = Math.floor(maxDur.durationSeconds / 3600);
+            const m = Math.round((maxDur.durationSeconds % 3600) / 60);
+            document.getElementById('rec-dur-val').innerText = `${h}h ${m}m`;
+            document.getElementById('rec-dur-date').innerText = fmtDate(maxDur.startTime);
+
+            // Speed
+            document.getElementById('rec-spd-val').innerText = `${Math.round(maxSpd.maxSpeedMPH)} MPH`;
+            document.getElementById('rec-spd-date').innerText = fmtDate(maxSpd.startTime);
+        }
+
+        // --- Masonry Grid Rendering ---
+        function handleFilter() {
+            const txt = document.getElementById('search-input').value.toLowerCase();
+            const start = document.getElementById('date-start').value;
+            const sortMode = document.getElementById('sort-select').value;
+
+            let filtered = allDrives.filter(d => {
+                if (start && !d.startTime.startsWith(start)) return false;
+                if (txt) {
+                    const search = (
+                        d.driveId +
+                        (d.startReason || 'unknown') +
+                        (d.endReason || 'unknown') +
+                        (d.deviceModel || '')
+                    ).toLowerCase();
+
+                    if (!search.includes(txt)) return false;
+                }
+                return true;
+            });
+
+            // Sorting
+            if (sortMode === 'newest') filtered.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+            else if (sortMode === 'longest') filtered.sort((a, b) => b.distanceMeters - a.distanceMeters);
+            else if (sortMode === 'duration') filtered.sort((a, b) => b.durationSeconds - a.durationSeconds);
+
+            displayedDrives = filtered;
+            document.getElementById('count-label').innerText = `Showing ${filtered.length} drives`;
+
+            // Reset and Render chunks
+            const grid = document.getElementById('drives-grid');
+            grid.innerHTML = '';
+
+            // Re-init Masonry?
+            if (masonryInstance) masonryInstance.destroy();
+
+            // Initial load
+            limit = 20;
+            appendItems(0, limit);
+
+            // Init Masonry
+            masonryInstance = new Masonry(grid, {
+                itemSelector: '.grid-item',
+                columnWidth: '.grid-item',
+                percentPosition: true,
+                gutter: 24,
+                transitionDuration: '0.2s'
+            });
+
+            // Robust Layout: Use ResizeObserver to watch for card expansions
+            if (window.masonryObserver) window.masonryObserver.disconnect();
+
+            window.masonryObserver = new ResizeObserver(entries => {
+                // Debounce layout updates
+                if (window.masonryDebounce) clearTimeout(window.masonryDebounce);
+                window.masonryDebounce = setTimeout(() => {
+                    if (masonryInstance) masonryInstance.layout();
+                }, 50);
+            });
+
+            document.querySelectorAll('.grid-item').forEach(item => {
+                window.masonryObserver.observe(item);
+            });
+
+            updateLoadMoreBtn();
+        }
+
+        function loadMore() {
+            const start = limit;
+            limit += 20;
+            appendItems(start, limit);
+            masonryInstance.reloadItems();
+            masonryInstance.layout();
+            updateLoadMoreBtn();
+        }
+
+        function updateLoadMoreBtn() {
+            const btn = document.getElementById('load-more-btn');
+            btn.style.display = (limit < displayedDrives.length) ? 'block' : 'none';
+        }
+
+
+
+        // --- New Features Implementation ---
+
+        // Toggle nerdy details dropdown
+        function toggleNerdyDetails(driveId) {
+            const details = document.getElementById(`nerdy-${driveId}`);
+            const toggle = details.previousElementSibling;
+            if (details.classList.contains('show')) {
+                details.classList.remove('show');
+                toggle.classList.remove('expanded');
+            } else {
+                details.classList.add('show');
+                toggle.classList.add('expanded');
+            }
+        }
+
+
+        // 1. Hover Scrubbing (disabled)
+        let minimapRegistry = {}; // Store map instances: { driveId: mapObj }
+        let scrubberMarkers = {}; // Store markers: { driveId: markerObj }
+
+        function handleCardHover(e, driveId, polylineStr, speeds) {
+            const card = e.currentTarget;
+            const rect = card.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const width = rect.width;
+            const pct = Math.max(0, Math.min(1, x / width));
+
+            const pts = decodePolyline(polylineStr);
+            if (!pts.length) return;
+
+            const idx = Math.floor(pct * (pts.length - 1));
+            const pt = pts[idx];
+
+            // Update Marker
+            const map = minimapRegistry[driveId];
+            if (!map) return;
+
+            if (!scrubberMarkers[driveId]) {
+                scrubberMarkers[driveId] = L.circleMarker(pt, {
+                    radius: 6, color: '#fff', fillColor: '#0a84ff', fillOpacity: 1, weight: 2
+                }).addTo(map);
+            } else {
+                scrubberMarkers[driveId].setLatLng(pt);
+                scrubberMarkers[driveId].getElement().style.display = 'block';
+            }
+
+            // Show tooltip/info overlay logic could go here
+        }
+
+        function handleCardLeave(driveId) {
+            if (scrubberMarkers[driveId]) {
+                scrubberMarkers[driveId].getElement().style.display = 'none';
+            }
+        }
+
+        // 2. Gradient Polyline Helper
+        function addGradientPolyline(map, pts, speeds) {
+            if (!speeds || speeds.length !== pts.length) {
+                // Fallback
+                L.polyline(pts, { color: '#0a84ff', weight: 4, opacity: 0.8 }).addTo(map);
+                return;
+            }
+
+            // Color scale: <15mph (orange), 15-50 (green), >50 (teal)
+            // Or simplified: Slow (Traffic/City) = Orange, Fast (Highway) = Green
+
+            // We will draw segments. For performance on many maps, we should use Canvas.
+            // But Leaflet 1.0+ handles this reasonable well if points are low.
+            // Better: Use a single polyline with a gradient? value-based is hard.
+            // We will do simple segments.
+
+            for (let i = 0; i < pts.length - 1; i++) {
+                const spd = speeds[i];
+                let color = '#30d158'; // Green (Fast/Normal)
+                if (spd < 20) color = '#ff9f0a'; // Orange (Slow/City)
+                if (spd > 65) color = '#30d158'; // Keep green for hwy, maybe darker?
+                if (spd === 0) color = '#ff453a'; // Stopped
+
+                L.polyline([pts[i], pts[i + 1]], {
+                    color: color, weight: 4, opacity: 0.8,
+                    renderer: L.canvas() // Force canvas for performance
+                }).addTo(map);
+            }
+        }
+
+        // Updated appendItems to use new logic
+        function appendItems(start, end) {
+            const slice = displayedDrives.slice(start, end);
+            const grid = document.getElementById('drives-grid');
+
+            const html = slice.map(d => {
+                const dist = (d.distanceMeters * 0.000621371).toFixed(1);
+                const durMins = Math.round(d.durationSeconds / 60);
+                const dateObj = new Date(d.startTime);
+                const dateStr = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+                const timeStr = dateObj.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+                const mapId = `mini-${d.driveId}`;
+
+                // Build G-force badges
+                let gforceBadges = '';
+                const brakes = d.hardBrakeCount || 0;
+                const accels = d.hardAccelCount || 0;
+                const corners = d.hardCornerCount || 0;
+
+                if (brakes > 0 || accels > 0 || corners > 0) {
+                    gforceBadges = '<div class="gforce-badges">';
+                    if (brakes > 0) gforceBadges += `<span class="gf-badge gf-brake">${brakes}</span>`;
+                    if (accels > 0) gforceBadges += `<span class="gf-badge gf-accel">${accels}</span>`;
+                    if (corners > 0) gforceBadges += `<span class="gf-badge gf-corner">${corners}</span>`;
+                    gforceBadges += '</div>';
+                }
+
+                // Nerdy details
+                const maxSpd = Math.round(d.maxSpeedMPH || 0);
+                const endReason = d.endReason || 'unknown';
+                const gpsSamples = d.locationSampleCount || '—';
+                const detectionMs = d.detectionLatencyMs != null ? d.detectionLatencyMs + 'ms' : '—';
+                const bufferedPts = d.bufferedPointCount || 0;
+                const batteryDrain = (d.batteryLevelAtStart != null && d.batteryLevelAtEnd != null)
+                    ? Math.round((d.batteryLevelAtStart - d.batteryLevelAtEnd) * 100) + '%'
+                    : '—';
+                const deviceInfo = d.deviceModel ? `${d.deviceModel}` : '—';
+                const iosVer = d.iosVersion || '';
+
+                // Get start/end coords from polyline
+                const pts = decodePolyline(d.polyline);
+                const startCoord = pts.length > 0 ? `${pts[0][0].toFixed(4)}, ${pts[0][1].toFixed(4)}` : '—';
+                const endCoord = pts.length > 1 ? `${pts[pts.length - 1][0].toFixed(4)}, ${pts[pts.length - 1][1].toFixed(4)}` : '—';
+
+                // Detection latency quality indicator
+                let latencyClass = '';
+                if (d.detectionLatencyMs != null) {
+                    if (d.detectionLatencyMs < 3000) latencyClass = 'good';
+                    else if (d.detectionLatencyMs < 10000) latencyClass = 'warn';
+                    else latencyClass = 'bad';
+                }
+
+                return `
+            <div class="grid-item">
+                <div class="drive-card" id="card-${d.driveId}">
+                    <div class="drive-minimap" id="${mapId}" onclick="openMapModal('${d.driveId}')"></div>
+                    <div class="drive-content" onclick="openMapModal('${d.driveId}')">
+                        <div class="drive-header-row">
+                            <div>
+                                <div class="drive-date">${dateStr}</div>
+                                <div class="drive-timestamp">${timeStr}</div>
+                            </div>
+                             ${d.startReason ? `<span class="tag-pill tag-blue">${d.startReason}</span>` : ''}
+                        </div>
+                        <div class="drive-stats-row">
+                            <div class="ds-item"><div class="val">${dist}</div><div class="lbl">Miles</div></div>
+                            <div class="ds-item"><div class="val">${durMins}</div><div class="lbl">Mins</div></div>
+                            <div class="ds-item"><div class="val">${maxSpd}</div><div class="lbl">Max MPH</div></div>
+                        </div>
+                        ${gforceBadges}
+                    </div>
+                    <div class="nerdy-toggle" onclick="event.stopPropagation(); toggleNerdyDetails('${d.driveId}')">
+                        <span>Details</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </div>
+                    <div class="nerdy-details" id="nerdy-${d.driveId}">
+                        <div class="nerdy-grid">
+                            <div class="nerdy-item">
+                                <span class="n-label">End Reason</span>
+                                <span class="n-value">${endReason}</span>
+                            </div>
+                            <div class="nerdy-item">
+                                <span class="n-label">GPS Samples</span>
+                                <span class="n-value">${gpsSamples}</span>
+                            </div>
+                            <div class="nerdy-item">
+                                <span class="n-label">Detection Latency</span>
+                                <span class="n-value ${latencyClass}">${detectionMs}</span>
+                            </div>
+                            <div class="nerdy-item">
+                                <span class="n-label">Buffered Points</span>
+                                <span class="n-value">${bufferedPts}</span>
+                            </div>
+                            <div class="nerdy-item">
+                                <span class="n-label">Battery Drain</span>
+                                <span class="n-value">${batteryDrain}</span>
+                            </div>
+                            <div class="nerdy-item">
+                                <span class="n-label">Device</span>
+                                <span class="n-value">${deviceInfo}${iosVer ? ' · iOS ' + iosVer : ''}</span>
+                            </div>
+                            <div class="nerdy-item full-width">
+                                <span class="n-label">Start Coordinates</span>
+                                <span class="n-value mono">${startCoord}</span>
+                            </div>
+                            <div class="nerdy-item full-width">
+                                <span class="n-label">End Coordinates</span>
+                                <span class="n-value mono">${endCoord}</span>
+                            </div>
+                            
+                            <!-- System Context (New Row) -->
+                            <div class="nerdy-item">
+                                <span class="n-label">App Version</span>
+                                <span class="n-value">${d.appVersion || '—'}</span>
+                            </div>
+                            <div class="nerdy-item">
+                                <span class="n-label">Low Power Mode</span>
+                                <span class="n-value">${d.lowPowerModeAtStart === true ? 'Enabled' : 'Disabled'}</span>
+                            </div>
+
+                            <!-- Drive Timeline / Log -->
+                            <div class="nerdy-item full-width" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 12px;">
+                                <span class="n-label" style="margin-bottom: 8px;">Drive Timeline</span>
+                                <div class="timeline-log" id="log-${d.driveId}">
+                                    ${renderTimelineLog(d)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            `;
+            }).join('');
+
+            grid.insertAdjacentHTML('beforeend', html);
+
+            // Post-insert init
+            setTimeout(() => {
+                slice.forEach(d => {
+                    const el = document.getElementById(`mini-${d.driveId}`);
+                    if (!el) return;
+
+                    try {
+                        const m = L.map(el, {
+                            zoomControl: false, attributionControl: false, rotate: false, touchZoom: false,
+                            scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, dragging: false,
+                            preferCanvas: true // CRITICAL for gradient segments
+                        });
+
+                        const mapStyle = getCurrentMapStyle();
+                        L.tileLayer(mapStyle.url, { attribution: mapStyle.attribution }).addTo(m);
+
+                        const pts = decodePolyline(d.polyline);
+                        if (pts.length) {
+                            addGradientPolyline(m, pts, d.speeds);
+                            m.fitBounds(L.polyline(pts).getBounds(), { padding: [10, 10] });
+
+                            // Start/End markers
+                            L.circleMarker(pts[0], { color: '#30d158', radius: 4, fillOpacity: 1, weight: 1 }).addTo(m);
+                            L.circleMarker(pts[pts.length - 1], { color: '#ff453a', radius: 4, fillOpacity: 1, weight: 1 }).addTo(m);
+                        }
+
+                        minimapRegistry[d.driveId] = m;
+
+                        // Hover scrubbing removed - was causing unwanted animation
+
+                    } catch (e) { console.log("Map err", e); }
+                });
+            }, 100);
+        }
+
+        // Updated Heatmap for Clicking
+        function renderHeatmap(drives) {
+            const grid = document.getElementById('heatmap-grid');
+            if (!grid) return;
+            grid.innerHTML = '';
+
+            const map = {};
+            drives.forEach(d => {
+                const k = d.startTime.split('T')[0];
+                map[k] = (map[k] || 0) + (d.distanceMeters * 0.000621371);
+            });
+
+            const start = new Date();
+            start.setDate(start.getDate() - (52 * 7));
+
+            for (let i = 0; i < 52 * 7; i++) {
+                const d = new Date(start);
+                d.setDate(d.getDate() + i);
+                const k = d.toISOString().split('T')[0];
+                const val = map[k] || 0;
+
+                let l = 0;
+                if (val > 0) l = 1;
+                if (val > 10) l = 2;
+                if (val > 30) l = 3;
+                if (val > 60) l = 4;
+
+                const cell = document.createElement('div');
+                cell.className = 'day-cell';
+                cell.setAttribute('data-l', l);
+                cell.title = `${k}: ${val.toFixed(1)} miles`;
+
+                // CLICK HANDLER
+                cell.onclick = () => {
+                    document.getElementById('date-start').value = k;
+                    // document.getElementById('date-end').value = k; // Optional: single day filter?
+                    // Let's just set the filter and maybe scroll up
+                    handleFilter();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                };
+
+                cell.style.cursor = 'pointer'; // Visual cue
+
+                grid.appendChild(cell);
+            }
+        }
+
+        // --- Chart Renderers ---
+        function renderReasonChart(drives) {
+            const canvas = document.getElementById('reasonsChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            // Aggregate
+            const counts = {};
+            drives.forEach(d => {
+                const r = d.startReason || 'Unknown';
+                counts[r] = (counts[r] || 0) + 1;
+            });
+
+            const labels = Object.keys(counts);
+            const data = Object.values(counts);
+
+            if (window.reasonsChartInst) window.reasonsChartInst.destroy();
+
+            window.reasonsChartInst = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: [
+                            '#0071e3', // primary
+                            '#34c759', // success
+                            '#af52de', // purple
+                            '#ff9f0a', // orange
+                            '#ff3b30', // red
+                            '#64d2ff'  // sky
+                        ],
+                        borderWidth: 0,
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: 'var(--text-secondary)',
+                                font: { size: 10 },
+                                boxWidth: 8,
+                                padding: 15,
+                                usePointStyle: true
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            padding: 12,
+                            callbacks: {
+                                label: (context) => {
+                                    const val = context.raw;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const pct = Math.round((val / total) * 100);
+                                    return ` ${context.label}: ${val} (${pct}%)`;
+                                }
+                            }
+                        }
+                    },
+                    cutout: '75%',
+                    borderRadius: 4
+                }
+            });
+        }
+
+        function renderWeeklyChart(drives) {
+            const canvas = document.getElementById('weeklyChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            // Group by day of week (last 7 days)
+            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const now = new Date();
+            const labels = [];
+            const data = [];
+
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(now);
+                d.setDate(d.getDate() - i);
+                const dStr = d.toISOString().split('T')[0];
+                labels.push(days[d.getDay()]);
+
+                const miles = drives
+                    .filter(x => x.startTime.startsWith(dStr))
+                    .reduce((a, b) => a + (b.distanceMeters * 0.000621371), 0);
+                data.push(parseFloat(miles.toFixed(1)));
+            }
+
+            // Create Gradient
+            const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+            gradient.addColorStop(0, 'rgba(0, 113, 227, 0.4)');
+            gradient.addColorStop(1, 'rgba(0, 113, 227, 0)');
+
+            // Destroy previous instance if exists
+            if (window.weeklyChartInst) window.weeklyChartInst.destroy();
+
+            window.weeklyChartInst = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Miles',
+                        data: data,
+                        borderColor: '#0071e3',
+                        borderWidth: 3,
+                        pointBackgroundColor: '#0071e3',
+                        pointBorderColor: '#fff',
+                        pointHoverRadius: 6,
+                        tension: 0.4,
+                        fill: true,
+                        backgroundColor: gradient
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            titleFont: { size: 12 },
+                            bodyFont: { size: 14, weight: 'bold' },
+                            padding: 12,
+                            displayColors: false,
+                            callbacks: {
+                                label: (ctx) => `${ctx.raw} miles`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(255,255,255,0.05)', drawBorder: false },
+                            ticks: { color: 'var(--text-tertiary)', font: { size: 10 } }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: 'var(--text-tertiary)', font: { size: 10 } }
+                        }
+                    }
+                }
+            });
+        }
+
+
+
+        // --- Timeline Log Generator ---
+        function renderTimelineLog(d) {
+            const events = [];
+            const startTime = new Date(d.startTime);
+            const endTime = new Date(d.endTime);
+
+            // If we have synced log entries from iOS, use them directly
+            if (d.logEntries && d.logEntries.length > 0) {
+                d.logEntries.forEach(entry => {
+                    const entryTime = new Date(entry.timestamp);
+                    
+                    // Determine event type/styling based on category and eventType
+                    let type = 'info';
+                    let emoji = '';
+                    
+                    switch (entry.category) {
+                        case 'decision':
+                            type = 'highlight';
+                            if (entry.eventType.includes('end') || entry.eventType.includes('timeout')) type = 'end';
+                            if (entry.eventType.includes('start') || entry.eventType.includes('exit')) type = 'start';
+                            if (entry.eventType.includes('ignored')) type = 'info';
+                            break;
+                        case 'motion':
+                            type = 'info';
+                            emoji = '🚗 ';
+                            break;
+                        case 'location':
+                            type = 'info';
+                            if (entry.eventType.includes('rejected')) type = 'warning';
+                            break;
+                        case 'anomaly':
+                            type = 'warning';
+                            emoji = '⚠️ ';
+                            break;
+                        case 'system':
+                            type = 'info';
+                            emoji = '⚙️ ';
+                            break;
+                    }
+                    
+                    events.push({
+                        time: entryTime,
+                        msg: emoji + entry.message,
+                        type: type,
+                        metadata: entry.metadata
+                    });
+                });
+                
+                // Sort by time
+                events.sort((a, b) => a.time - b.time);
+                
+                // Render with log entry format
+                return events.map(e => {
+                    const timeStr = e.time.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    return `
+                        <div class="log-entry ${e.type}">
+                            <span class="log-time">[${timeStr}]</span>
+                            <span class="log-msg">${escapeHtml(e.msg)}</span>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            // Fallback: Generate timeline from drive metrics (for drives synced before log entries were added)
+            
+            // 1. Drive Started
+            events.push({
+                time: startTime,
+                msg: `Drive Started (${d.startReason || 'Unknown'})`,
+                type: 'start'
+            });
+
+            // 2. Buffered points captured (if any)
+            if (d.bufferedPointCount > 0) {
+                events.push({
+                    time: startTime,
+                    msg: `${d.bufferedPointCount} buffered location(s) from maybeDriving state`,
+                    type: 'info'
+                });
+            }
+
+            // 3. Detection latency milestone
+            if (d.detectionLatencyMs != null && d.detectionLatencyMs > 0) {
+                const detectionTime = new Date(startTime.getTime() + d.detectionLatencyMs);
+                events.push({
+                    time: detectionTime,
+                    msg: `First GPS fix acquired (+${(d.detectionLatencyMs / 1000).toFixed(1)}s)`,
+                    type: 'info'
+                });
+            }
+
+            // 4. Confirmation latency (speed confirmed)
+            if (d.confirmationLatencyMs != null && d.confirmationLatencyMs > 0) {
+                const confirmTime = new Date(startTime.getTime() + (d.detectionLatencyMs || 0) + d.confirmationLatencyMs);
+                events.push({
+                    time: confirmTime,
+                    msg: `Driving speed confirmed (+${(d.confirmationLatencyMs / 1000).toFixed(1)}s)`,
+                    type: 'info'
+                });
+            }
+
+            // 5. Max speed milestone
+            if (d.maxSpeedMPH > 0) {
+                // Estimate when max speed occurred (midpoint as approximation)
+                const midTime = new Date((startTime.getTime() + endTime.getTime()) / 2);
+                events.push({
+                    time: midTime,
+                    msg: `Peak speed: ${Math.round(d.maxSpeedMPH)} mph`,
+                    type: 'highlight'
+                });
+            }
+
+            // 6. G-Force Events
+            if (d.accelerationEvents && d.accelerationEvents.length > 0) {
+                d.accelerationEvents.forEach(e => {
+                    let label = 'Event';
+                    let type = 'highlight';
+                    if (e.eventType === 'hardBrake') { label = '🛑 Hard Brake'; type = 'critical'; }
+                    else if (e.eventType === 'hardAcceleration') { label = '🚀 Hard Accel'; type = 'highlight'; }
+                    else if (e.eventType.includes('Corner')) { label = '↩️ Hard Turn'; type = 'highlight'; }
+
+                    events.push({
+                        time: new Date(e.timestamp),
+                        msg: `${label} (${e.gForceMagnitude.toFixed(2)}g)`,
+                        type: type
+                    });
+                });
+            }
+
+            // 7. GPS gaps (if significant)
+            if (d.maxGapBetweenSamplesMs != null && d.maxGapBetweenSamplesMs > 10000) {
+                events.push({
+                    time: new Date((startTime.getTime() + endTime.getTime()) / 2),
+                    msg: `⚠️ GPS gap: ${(d.maxGapBetweenSamplesMs / 1000).toFixed(0)}s between samples`,
+                    type: 'warning'
+                });
+            }
+
+            // 8. Location pauses (iOS background issues)
+            if (d.locationPauseCount > 0) {
+                events.push({
+                    time: new Date((startTime.getTime() + endTime.getTime()) / 2),
+                    msg: `⏸️ ${d.locationPauseCount} iOS location pause(s)`,
+                    type: 'warning'
+                });
+            }
+
+            // 9. Drive Ended
+            events.push({
+                time: endTime,
+                msg: `Drive Ended (${d.endReason || 'Unknown'})`,
+                type: 'end'
+            });
+
+            // 10. Summary line
+            const samples = d.locationSampleCount || d.pointCount || 0;
+            events.push({
+                time: new Date(endTime.getTime() + 1), // Push after end
+                msg: `📊 ${samples} GPS samples, ${(d.distanceMeters * 0.000621371).toFixed(2)} mi total`,
+                type: 'summary'
+            });
+
+            // Sort by time
+            events.sort((a, b) => a.time - b.time);
+
+            // Render
+            return events.map(e => {
+                const timeStr = e.time.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                return `
+                    <div class="log-entry ${e.type}">
+                        <span class="log-time">[${timeStr}]</span>
+                        <span class="log-msg">${e.msg}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // --- Polyline Decoder (Google Encoded Polyline) ---
+        function decodePolyline(str, precision) {
+            var index = 0, lat = 0, lng = 0, coordinates = [], shift = 0, result = 0, byte = null, latitude_change, longitude_change, factor = Math.pow(10, precision || 5);
+            if (!str) return [];
+            while (index < str.length) {
+                byte = null; shift = 0; result = 0;
+                do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+                latitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                shift = result = 0;
+                do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+                longitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                lat += latitude_change; lng += longitude_change;
+                coordinates.push([lat / factor, lng / factor]);
+            }
+            return coordinates;
+        }
+
+        // --- Modal / Map View ---
+        let mapInst = null;
+        function openMapModal(id) {
+            const d = allDrives.find(x => x.driveId === id);
+            if (!d) return;
+
+            document.getElementById('main-modal').classList.add('active');
+
+            // Build title with G-force info if available
+            const totalEvents = (d.hardBrakeCount || 0) + (d.hardAccelCount || 0) + (d.hardCornerCount || 0);
+            let title = `${new Date(d.startTime).toLocaleString()} • ${(d.distanceMeters * 0.000621371).toFixed(1)} mi`;
+            if (totalEvents > 0) {
+                title += ` • ${totalEvents} events`;
+            }
+            document.getElementById('modal-title').innerText = title;
+
+            if (!mapInst) {
+                mapInst = L.map('map-leaflet').setView([0, 0], 13);
+                const mapStyle = getCurrentMapStyle();
+                modalMapLayer = L.tileLayer(mapStyle.url, {
+                    attribution: mapStyle.attribution
+                });
+                modalMapLayer.addTo(mapInst);
+            }
+            // Clear layers
+            mapInst.eachLayer(l => { if (l instanceof L.Polyline || l instanceof L.CircleMarker || l instanceof L.Marker) mapInst.removeLayer(l); });
+
+            const pts = decodePolyline(d.polyline);
+            if (pts.length) {
+                const line = L.polyline(pts, { color: '#0a84ff', weight: 6 }).addTo(mapInst);
+                mapInst.fitBounds(line.getBounds(), { padding: [50, 50] });
+
+                // Start/End
+                L.circleMarker(pts[0], { color: '#30d158', radius: 6, fillOpacity: 1 }).addTo(mapInst);
+                L.circleMarker(pts[pts.length - 1], { color: '#ff453a', radius: 6, fillOpacity: 1 }).addTo(mapInst);
+
+                // Add G-force event markers
+                if (d.accelerationEvents && d.accelerationEvents.length > 0) {
+                    d.accelerationEvents.forEach(evt => {
+                        if (evt.latitude && evt.longitude) {
+                            const color = getEventColor(evt.eventType);
+                            const label = getEventLabel(evt.eventType);
+                            const gForce = evt.gForceMagnitude ? evt.gForceMagnitude.toFixed(2) + 'g' : '';
+
+                            const marker = L.circleMarker([evt.latitude, evt.longitude], {
+                                color: color,
+                                fillColor: color,
+                                fillOpacity: 0.8,
+                                radius: 8,
+                                weight: 2
+                            }).addTo(mapInst);
+
+                            marker.bindPopup(`<strong>${label}</strong><br>${gForce}`);
+                        }
+                    });
+                }
+            }
+        }
+
+        function getEventColor(eventType) {
+            switch (eventType) {
+                case 'hardBrake': return '#ff453a';      // Red
+                case 'hardAcceleration': return '#ff9f0a'; // Orange
+                case 'hardCornerLeft':
+                case 'hardCornerRight': return '#ffd60a';  // Yellow
+                default: return '#8e8e93';
+            }
+        }
+
+        function getEventLabel(eventType) {
+            switch (eventType) {
+                case 'hardBrake': return 'Hard Brake';
+                case 'hardAcceleration': return 'Hard Acceleration';
+                case 'hardCornerLeft': return 'Hard Left Turn';
+                case 'hardCornerRight': return 'Hard Right Turn';
+                default: return 'Event';
+            }
+        }
+
+        // --- Global Map ---
+        function openGlobalMap() {
+            document.getElementById('main-modal').classList.add('active');
+            document.getElementById('modal-title').innerText = `All Drives (${allDrives.length})`;
+
+            if (!mapInst) {
+                mapInst = L.map('map-leaflet', {
+                    preferCanvas: true // Important for performance
+                }).setView([0, 0], 13);
+                window.globalMap = mapInst;
+
+                const mapStyle = getCurrentMapStyle();
+                globalMapLayer = L.tileLayer(mapStyle.url, {
+                    attribution: mapStyle.attribution
+                });
+                globalMapLayer.addTo(mapInst);
+            }
+
+            // Clear layers
+            mapInst.eachLayer(l => {
+                if (l instanceof L.Polyline || l instanceof L.CircleMarker) mapInst.removeLayer(l);
+            });
+
+            // Draw ALL drives
+            const bounds = L.latLngBounds([]);
+            let hasLayers = false;
+
+            allDrives.forEach(d => {
+                const pts = decodePolyline(d.polyline);
+                if (pts.length) {
+                    // Use simple lines for global map (gradients are too heavy)
+                    const line = L.polyline(pts, {
+                        color: '#0a84ff', // Blue
+                        weight: 2,
+                        opacity: 0.5,
+                        renderer: L.canvas()
+                    }).addTo(mapInst);
+
+                    bounds.extend(line.getBounds());
+                    hasLayers = true;
+                }
+            });
+
+            if (hasLayers) {
+                mapInst.fitBounds(bounds, { padding: [50, 50] });
+            }
+
+            setTimeout(() => mapInst.invalidateSize(), 300);
+        }
+
+        function closeModal() {
+            document.getElementById('main-modal').classList.remove('active');
+        }
+
+        function scrollToStats() {
+            document.getElementById('stats-section').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function toggleTheme() {
+            const root = document.documentElement;
+            const cur = root.getAttribute('data-theme');
+            root.setAttribute('data-theme', cur === 'light' ? 'dark' : 'light');
+        }
+
+        // --- Saved Places ---
+        let placesMap = null;
+        let placesLoaded = false;
+        let allPlaces = [];
+
+        function togglePlacesSection() {
+            const section = document.getElementById('places-section');
+            const btn = document.getElementById('places-toggle-btn');
+            
+            if (section.style.display === 'none') {
+                section.style.display = 'block';
+                btn.textContent = 'Hide';
+                
+                if (!placesLoaded) {
+                    loadPlaces();
+                } else {
+                    // Re-init map if needed
+                    setTimeout(() => {
+                        if (placesMap) placesMap.invalidateSize();
+                    }, 100);
+                }
+            } else {
+                section.style.display = 'none';
+                btn.textContent = 'Show';
+            }
+        }
+
+        async function loadPlaces() {
+            try {
+                const headers = {};
+                if (apiKey) headers['X-API-Key'] = apiKey;
+
+                const res = await fetch('/places', { headers });
+                
+                if (!res.ok) {
+                    document.getElementById('places-list').innerHTML = 
+                        '<div style="color: var(--accent-danger);">Failed to load places</div>';
+                    return;
+                }
+
+                allPlaces = await res.json();
+                placesLoaded = true;
+                
+                renderPlacesList();
+                initPlacesMap();
+                
+            } catch (e) {
+                console.error('Failed to load places:', e);
+                document.getElementById('places-list').innerHTML = 
+                    '<div style="color: var(--accent-danger);">Error loading places</div>';
+            }
+        }
+
+        function renderPlacesList() {
+            const container = document.getElementById('places-list');
+            
+            if (allPlaces.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-secondary); font-size: 13px;">No saved places yet. Add places from the iOS app.</div>';
+                return;
+            }
+
+            container.innerHTML = allPlaces.map(place => `
+                <div class="place-item" onclick="focusPlace('${place.placeId}')" style="
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    padding: 12px;
+                    background: var(--glass-bg);
+                    border-radius: var(--radius-sm);
+                    cursor: pointer;
+                    transition: background 0.2s;
+                " onmouseover="this.style.background='var(--card-hover)'" onmouseout="this.style.background='var(--glass-bg)'">
+                    <div style="font-size: 20px;">${getPlaceIcon(place.icon)}</div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(place.name)}</div>
+                        <div style="font-size: 11px; color: var(--text-tertiary);">${Math.round(place.radiusMeters)}m radius</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getPlaceIcon(iconName) {
+            // Map SF Symbol names to emoji
+            const iconMap = {
+                'house.fill': '🏠',
+                'building.2.fill': '🏢',
+                'cart.fill': '🛒',
+                'fork.knife': '🍽️',
+                'figure.walk': '🚶',
+                'dumbbell.fill': '💪',
+                'cross.fill': '⛪',
+                'graduationcap.fill': '🎓',
+                'airplane': '✈️',
+                'car.fill': '🚗',
+                'mappin.circle.fill': '📍'
+            };
+            return iconMap[iconName] || '📍';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function initPlacesMap() {
+            if (!placesMap) {
+                placesMap = L.map('places-map').setView([39.8283, -98.5795], 4); // Center of US
+                
+                const mapStyle = getCurrentMapStyle();
+                L.tileLayer(mapStyle.url, {
+                    attribution: mapStyle.attribution
+                }).addTo(placesMap);
+            }
+
+            // Clear existing layers
+            placesMap.eachLayer(layer => {
+                if (layer instanceof L.Circle || layer instanceof L.Marker) {
+                    placesMap.removeLayer(layer);
+                }
+            });
+
+            if (allPlaces.length === 0) return;
+
+            const bounds = L.latLngBounds([]);
+
+            allPlaces.forEach(place => {
+                // Add geofence circle
+                const circle = L.circle([place.latitude, place.longitude], {
+                    radius: place.radiusMeters,
+                    color: '#0a84ff',
+                    fillColor: '#0a84ff',
+                    fillOpacity: 0.2,
+                    weight: 2
+                }).addTo(placesMap);
+
+                circle.bindPopup(`<strong>${escapeHtml(place.name)}</strong><br>${Math.round(place.radiusMeters)}m radius`);
+
+                // Add center marker
+                L.circleMarker([place.latitude, place.longitude], {
+                    radius: 6,
+                    color: '#fff',
+                    fillColor: '#0a84ff',
+                    fillOpacity: 1,
+                    weight: 2
+                }).addTo(placesMap);
+
+                bounds.extend([place.latitude, place.longitude]);
+            });
+
+            placesMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+
+            setTimeout(() => placesMap.invalidateSize(), 100);
+        }
+
+        function focusPlace(placeId) {
+            const place = allPlaces.find(p => p.placeId === placeId);
+            if (place && placesMap) {
+                placesMap.setView([place.latitude, place.longitude], 16);
+            }
+        }
+
+    </script>
+</body>
+
+</html>

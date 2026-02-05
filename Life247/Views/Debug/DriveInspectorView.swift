@@ -125,6 +125,14 @@ struct DriveInspectorView: View {
                         Spacer()
                     }
                 }
+
+                if drive.distanceGapSkipCount > 0 {
+                    HStack {
+                        summaryItem(label: "Gap Skips", value: "\(drive.distanceGapSkipCount)")
+                        Spacer()
+                        summaryItem(label: "Skipped Dist", value: String(format: "%.2f mi", drive.distanceGapSkippedMeters / 1609.344))
+                    }
+                }
             }
             .padding()
             .background(Color(.secondarySystemGroupedBackground))
@@ -322,6 +330,8 @@ struct DriveInspectorView: View {
         lines.append("Dropped: \(drive.droppedSampleCount)")
         lines.append("GPS Pauses: \(drive.locationPauseCount)")
         lines.append("Max Gap: \(String(format: "%.0fs", drive.maxGapBetweenSamples))")
+        lines.append("Gap Skips: \(drive.distanceGapSkipCount)")
+        lines.append("Skipped Distance: \(String(format: "%.2f mi", drive.distanceGapSkippedMeters / 1609.344))")
         lines.append("")
         
         // System Context
@@ -372,6 +382,8 @@ struct DriveInspectorView: View {
         let droppedSampleCount = drive.droppedSampleCount
         let locationPauseCount = drive.locationPauseCount
         let maxGapBetweenSamples = drive.maxGapBetweenSamples
+        let distanceGapSkipCount = drive.distanceGapSkipCount
+        let distanceGapSkippedMiles = drive.distanceGapSkippedMeters / 1609.344
         let iosVersion = drive.iosVersion
         let deviceModel = drive.deviceModel
         let appVersion = drive.appVersion
@@ -418,6 +430,8 @@ struct DriveInspectorView: View {
             lines.append("Dropped: \(droppedSampleCount)")
             lines.append("GPS Pauses: \(locationPauseCount)")
             lines.append("Max Gap: \(String(format: "%.0fs", maxGapBetweenSamples))")
+            lines.append("Gap Skips: \(distanceGapSkipCount)")
+            lines.append("Skipped Distance: \(String(format: "%.2f mi", distanceGapSkippedMiles))")
             lines.append("")
             
             // System Context

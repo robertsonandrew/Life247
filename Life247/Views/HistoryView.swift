@@ -24,9 +24,10 @@ struct HistoryView: View {
     @State private var groupedTimeline: [(key: Date, value: [TimelineItem])] = []
     @State private var daySummaries: [Date: DaySummary] = [:]
     @State private var frequentStops: FrequentStopAnalysisResult = .empty
-    @State private var displayLimit: Int = 10
+    @State private var driveLimit: Int = 20
     @State private var isLoading = true
-    private let pageSize: Int = 5
+    @State private var isLoadingMore = false
+    private let drivePageSize: Int = 10
     
     // Deletion confirmation state
     @State private var driveToDelete: Drive?
@@ -54,27 +55,29 @@ struct HistoryView: View {
     
     /// Whether there are more items to load
     private var hasMore: Bool {
-        displayLimit < timeline.count
+        driveLimit < drives.count
     }
-    
-    /// Visible grouped items (paginated)
+
+    /// Visible grouped items (paginated by drives, not items)
     private var visibleGroupedItems: [(key: Date, value: [TimelineItem])] {
-        // Calculate how many items we've shown
-        var itemCount = 0
+        var driveCount = 0
         var result: [(key: Date, value: [TimelineItem])] = []
-        
+
         for group in groupedTimeline {
-            if itemCount >= displayLimit { break }
-            
-            let remainingSlots = displayLimit - itemCount
-            let itemsToTake = min(group.value.count, remainingSlots)
-            
-            if itemsToTake > 0 {
-                result.append((key: group.key, value: Array(group.value.prefix(itemsToTake))))
-                itemCount += itemsToTake
+            if driveCount >= driveLimit { break }
+
+            var groupItems: [TimelineItem] = []
+            for item in group.value {
+                if driveCount >= driveLimit { break }
+                groupItems.append(item)
+                if case .drive = item { driveCount += 1 }
+            }
+
+            if !groupItems.isEmpty {
+                result.append((key: group.key, value: groupItems))
             }
         }
-        
+
         return result
     }
     
@@ -231,19 +234,17 @@ struct HistoryView: View {
                 .textCase(nil)
             }
             
-            // Load More button
             if hasMore {
                 Section {
-                    Button(action: loadMore) {
-                        HStack {
-                            Spacer()
-                            Text("Load More (\(timeline.count - displayLimit) remaining)")
-                                .foregroundStyle(.blue)
-                            Spacer()
-                        }
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
                     }
+                    .onAppear { loadMore() }
                 }
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
@@ -328,24 +329,25 @@ struct HistoryView: View {
         while index < items.count {
             let item = items[index]
             if case .stop(let stop) = item,
+               stop.source == .betweenDrives,
                index + 1 < items.count,
                case .drive(let drive, _, _, _) = items[index + 1] {
-                let stopName = stop.displayName
-                let canSavePlace = stop.matchedPlace == nil
-                if stopName != "Stopped" {
-                    stopSummaries[drive.id] = StopSummary(
-                        summaryText: "Stop · \(stopName) · \(stop.formattedDuration)",
-                        coordinate: stop.location,
-                        canSavePlace: canSavePlace
-                    )
-                } else {
-                    stopSummaries[drive.id] = StopSummary(
-                        summaryText: "Stop · \(stop.formattedDuration)",
-                        coordinate: stop.location,
-                        canSavePlace: canSavePlace
-                    )
+                if stopSummaries[drive.id] == nil {
+                    stopSummaries[drive.id] = buildStopSummary(from: stop)
                 }
                 index += 1
+                continue
+            }
+
+            if case .drive(let drive, _, _, _) = item,
+               index + 1 < items.count,
+               case .stop(let stop) = items[index + 1],
+               stop.source == .inDriveGap {
+                if stopSummaries[drive.id] == nil {
+                    stopSummaries[drive.id] = buildStopSummary(from: stop)
+                }
+                result.append(item)
+                index += 2
                 continue
             }
             result.append(item)
@@ -355,6 +357,24 @@ struct HistoryView: View {
         return (result, stopSummaries)
     }
 
+    private func buildStopSummary(from stop: InferredStop) -> StopSummary {
+        let stopName = stop.displayName
+        let canSavePlace = stop.matchedPlace == nil
+        if stopName != "Stopped" {
+            return StopSummary(
+                summaryText: "Stop · \(stopName) · \(stop.formattedDuration)",
+                coordinate: stop.location,
+                canSavePlace: canSavePlace
+            )
+        } else {
+            return StopSummary(
+                summaryText: "Stop · \(stop.formattedDuration)",
+                coordinate: stop.location,
+                canSavePlace: canSavePlace
+            )
+        }
+    }
+
     private struct StopSummary {
         let summaryText: String
         let coordinate: CLLocationCoordinate2D
@@ -362,8 +382,9 @@ struct HistoryView: View {
     }
     
     private func loadMore() {
-        displayLimit += pageSize
-        // Rebuild timeline with new limit to fetch more drives
+        guard hasMore, !isLoadingMore else { return }
+        isLoadingMore = true
+        driveLimit += drivePageSize
         scheduleRebuild()
     }
     
@@ -371,7 +392,7 @@ struct HistoryView: View {
         // Snapshot inputs (value semantics)
         let drivesSnapshot = drives
         let placesSnapshot = places
-        let currentLimit = displayLimit + pageSize  // Build slightly ahead for smooth pagination
+        let currentLimit = driveLimit + drivePageSize  // Build slightly ahead for smooth pagination
 
         // SwiftData models are MainActor-isolated under Swift 6 strict concurrency.
         // Keep this work on the current actor to avoid cross-actor violations.
@@ -423,6 +444,7 @@ struct HistoryView: View {
             self.groupedTimeline = result.2
             self.daySummaries = result.3
             self.isLoading = false
+            self.isLoadingMore = false
         }
     }
 

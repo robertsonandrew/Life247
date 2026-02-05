@@ -20,6 +20,8 @@ struct ContentView: View {
     
     // Tab selection
     @State private var selectedTab: AppTab = .map
+    @State private var bottomBarDetent: BottomBarDetent = .peek
+    @State private var selectedHistoryRoute: HistoryRouteSelection?
     
     var body: some View {
         Group {
@@ -87,7 +89,10 @@ struct ContentView: View {
                 // Map is always rendered (just hidden when not selected)
                 DashboardView(
                     stateMachine: stateMachine,
-                    locationManager: locationManager
+                    locationManager: locationManager,
+                    selectedHistoryRoute: $selectedHistoryRoute,
+                    bottomBarDetent: $bottomBarDetent,
+                    isVisible: selectedTab == .map
                 )
                 .opacity(selectedTab == .map ? 1 : 0)
                 .zIndex(selectedTab == .map ? 1 : 0)
@@ -124,6 +129,8 @@ struct ContentView: View {
                         ? { stateMachine.recoverFromStuckDrive() }
                         : nil,
                     showDriveSheet: selectedTab == .map,
+                    currentDetent: $bottomBarDetent,
+                    selectedHistoryRoute: selectedHistoryRoute,
                     visibleHeight: $dynamicBottomBarHeight
                 )
             }
@@ -196,3 +203,4 @@ struct ContentView: View {
     )
     .modelContainer(for: Drive.self, inMemory: true)
 }
+
