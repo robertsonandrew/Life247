@@ -53,6 +53,7 @@ struct DashboardView: View {
     
     // Cache for history routes to prevent re-sorting on every frame
     @State private var historyRouteCache: [UUID: HistoryRoute] = [:]
+    @State private var historyCacheTask: Task<Void, Never>?
     @State private var routeFocusTask: Task<Void, Never>?
     @State private var lastFocusedRouteId: UUID?
     
@@ -74,6 +75,7 @@ struct DashboardView: View {
     private let routeRefitAnimationDuration: TimeInterval = 0.25
     private let routeFocusMinSpanDelta: Double = 0.004
     private let routeFocusPaddingFactor: Double = 1.22
+    private let maxHistoryOverlayPointsPerRoute: Int = 800
 
     enum MapVisualStyle: String, CaseIterable {
         case standard
@@ -317,6 +319,7 @@ struct DashboardView: View {
             }
             .onChange(of: isVisible) { _, visible in
                 if !visible {
+                    cancelHistoryCacheTask()
                     cancelRouteFocusTask()
                 }
             }
@@ -1225,13 +1228,12 @@ struct DashboardView: View {
     // MARK: - History Cache Helper
     
     private func updateHistoryCache() {
-        // Run as a task on MainActor (since accessing SwiftData models)
-        // But yield to allow UI responsiveness
-        Task { @MainActor in
+        cancelHistoryCacheTask()
+        // Run as one cancellable task to avoid overlapping heavy cache builds.
+        historyCacheTask = Task { @MainActor in
+            defer { historyCacheTask = nil }
             guard let windowStart = historyTimeSpan.windowStart else {
-                withAnimation {
-                    historyRouteCache = [:]
-                }
+                historyRouteCache = [:]
                 selectedHistoryRoute = nil
                 return
             }
@@ -1247,9 +1249,11 @@ struct DashboardView: View {
             var newCache: [UUID: HistoryRoute] = [:]
             
             for drive in drivesToCache {
+                guard !Task.isCancelled else { return }
                 // Accessing pointsChronological triggers sorting on Main Thread
                 // We yield every few drives to keep UI responsive
-                let coords = drive.pointsChronological.map { $0.coordinate }
+                let rawCoords = drive.pointsChronological.map { $0.coordinate }
+                let coords = downsampleHistoryOverlayCoordinates(rawCoords)
                 newCache[drive.id] = HistoryRoute(
                     coordinates: coords,
                     endTime: drive.endTime ?? drive.startTime
@@ -1257,15 +1261,41 @@ struct DashboardView: View {
                 await Task.yield()
             }
             
-            // Only update if we are still relevant (optional check)
-            withAnimation {
-                self.historyRouteCache = newCache
-            }
+            guard !Task.isCancelled else { return }
+            // Apply without animation to avoid retaining large old/new caches during transitions.
+            self.historyRouteCache = newCache
             
             if let selected = selectedHistoryRoute, newCache[selected.id] == nil {
                 selectedHistoryRoute = nil
             }
         }
+    }
+
+    private func cancelHistoryCacheTask() {
+        historyCacheTask?.cancel()
+        historyCacheTask = nil
+    }
+
+    private func downsampleHistoryOverlayCoordinates(
+        _ coordinates: [CLLocationCoordinate2D]
+    ) -> [CLLocationCoordinate2D] {
+        let count = coordinates.count
+        guard count > maxHistoryOverlayPointsPerRoute, maxHistoryOverlayPointsPerRoute > 2 else {
+            return coordinates
+        }
+
+        let target = maxHistoryOverlayPointsPerRoute
+        let step = Double(count - 1) / Double(target - 1)
+        var result: [CLLocationCoordinate2D] = []
+        result.reserveCapacity(target)
+
+        for index in 0..<target {
+            let sourceIndex = Int(round(Double(index) * step))
+            let clampedIndex = min(max(sourceIndex, 0), count - 1)
+            result.append(coordinates[clampedIndex])
+        }
+
+        return result
     }
 
     private func historyRouteColor(hue: Double, opacity: Double) -> Color {
