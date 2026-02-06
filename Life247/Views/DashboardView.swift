@@ -43,7 +43,7 @@ struct DashboardView: View {
     @AppStorage("historyTimeSpan") private var historyTimeSpanRaw: String = HistoryTimeSpan.off.rawValue
     @State private var routeCoordinates: [CLLocationCoordinate2D] = []  // Cached for stable polyline
     @State private var showMapStyleSheet = false
-    // REMOVED: @State private var interpolator = LocationInterpolator() - map is driven directly by GPS updates
+    @State private var interpolator = LocationInterpolator()
     @Namespace private var mapScope
 
     @State private var selectedPlaceForDwell: Place?
@@ -56,6 +56,7 @@ struct DashboardView: View {
     @State private var historyCacheTask: Task<Void, Never>?
     @State private var routeFocusTask: Task<Void, Never>?
     @State private var lastFocusedRouteId: UUID?
+    @State private var historyTapCycleState: HistoryRouteTapCycleState?
     
     private var historyTimeSpan: HistoryTimeSpan {
         HistoryTimeSpan(rawValue: historyTimeSpanRaw) ?? .off
@@ -76,6 +77,10 @@ struct DashboardView: View {
     private let routeFocusMinSpanDelta: Double = 0.004
     private let routeFocusPaddingFactor: Double = 1.22
     private let maxHistoryOverlayPointsPerRoute: Int = 800
+    private let maxHistoryHitTestPointsPerRoute: Int = 2400
+    private let historyRouteDimmedOpacityMultiplier: Double = 0.42
+    private let tapCycleMaxInterval: TimeInterval = 2.0
+    private let tapCycleAnchorMinDistanceMeters: Double = 18.0
 
     enum MapVisualStyle: String, CaseIterable {
         case standard
@@ -207,8 +212,8 @@ struct DashboardView: View {
 
     private var routeSelectionThresholdMeters: Double {
         // Scale with zoom: tighter when zoomed in, more forgiving when zoomed out
-        let scaled = cameraDistance * 0.02
-        return min(60, max(15, scaled))
+        let scaled = cameraDistance * 0.03
+        return min(120, max(25, scaled))
     }
 
     private var headingConeScale: CGFloat {
@@ -315,12 +320,14 @@ struct DashboardView: View {
                 if newId == nil {
                     cancelRouteFocusTask()
                     lastFocusedRouteId = nil
+                    historyTapCycleState = nil
                 }
             }
             .onChange(of: isVisible) { _, visible in
                 if !visible {
                     cancelHistoryCacheTask()
                     cancelRouteFocusTask()
+                    historyTapCycleState = nil
                 }
             }
     }
@@ -342,7 +349,12 @@ struct DashboardView: View {
                     if isHeadingTrackingMode {
                         primeHeadingConeIfNeeded()
                     }
+                    if let location = stateMachine.currentLocation {
+                        interpolator.receive(location)
+                    }
                     updateHistoryCache()
+                } else {
+                    interpolator.stop()
                 }
             }
             // Use .task for route initialization - runs before first render, guaranteed
@@ -534,7 +546,10 @@ struct DashboardView: View {
             let route = indexedRoute.element.value
             if driveId != selectedId {
                 let hue = historyRouteHue(for: indexedRoute.offset, total: sortedRoutes.count)
-                let opacity = historyRouteOpacity(for: route.endTime)
+                let baseOpacity = historyRouteOpacity(for: route.endTime)
+                let opacity = selectedId == nil
+                    ? baseOpacity
+                    : max(0.10, baseOpacity * historyRouteDimmedOpacityMultiplier)
                 MapPolyline(coordinates: route.coordinates)
                     .stroke(historyRouteColor(hue: hue, opacity: opacity), lineWidth: 5)
             }
@@ -567,14 +582,18 @@ struct DashboardView: View {
             }
 
             // Render puck + cone in one annotation view so they stay phase-aligned.
-            let coneLocation = stateMachine.currentLocation
+            let coneCoordinate = interpolator.displayCoordinate ?? stateMachine.currentLocation?.coordinate
             let showCone = isHeadingTrackingMode
-            let speedMPS = max(0, coneLocation?.speed ?? 0)
-            if let location = coneLocation {
-                let headingValue = liveResolvedHeading ?? currentDeviceHeading() ?? normalizeHeading(mapHeading)
+            let rawSpeed = stateMachine.currentLocation?.speed ?? 0
+            let speedMPS = max(0, interpolator.displaySpeed > 0 ? interpolator.displaySpeed : rawSpeed)
+            if let coordinate = coneCoordinate {
+                let fallbackHeading = liveResolvedHeading ?? currentDeviceHeading() ?? normalizeHeading(mapHeading)
+                let headingValue = interpolator.puckState == .moving
+                    ? interpolator.displayHeading
+                    : fallbackHeading
                 let annotationKey = "puck-\(showCone ? "heading" : "follow")-\(puckRenderNonce)"
                 if showCone {
-                    Annotation(annotationKey, coordinate: location.coordinate, anchor: .center) {
+                    Annotation(annotationKey, coordinate: coordinate, anchor: .center) {
                         PuckWithHeadingOverlay(
                             showCone: true,
                             heading: headingValue,
@@ -586,7 +605,7 @@ struct DashboardView: View {
                     }
                     .annotationTitles(.hidden)
                 } else {
-                    Annotation(annotationKey, coordinate: location.coordinate, anchor: .center) {
+                    Annotation(annotationKey, coordinate: coordinate, anchor: .center) {
                         PuckWithHeadingOverlay(
                             showCone: false,
                             heading: headingValue,
@@ -753,6 +772,12 @@ struct DashboardView: View {
     private func handleOnAppear() {
         guard isVisible else { return }
         if let location = stateMachine.currentLocation {
+            interpolator.receive(location)
+        }
+        if let heading = locationManager.currentHeading {
+            interpolator.receiveHeading(heading)
+        }
+        if let location = stateMachine.currentLocation {
             let age = Date().timeIntervalSince(location.timestamp)
             // Only use fresh locations for initial camera (avoid stale home cache)
             if age <= 12.0 {
@@ -774,6 +799,10 @@ struct DashboardView: View {
 
     private func handleLocationChange(_ newLocation: CLLocation?) {
         guard let location = newLocation else { return }
+
+        // Feed interpolator for 60fps puck smoothing while preserving raw GPS for drive logic.
+        interpolator.receive(location)
+
         let heading = refreshResolvedHeading(for: location)
         
         // Update camera directly from GPS location (no interpolator needed)
@@ -787,6 +816,9 @@ struct DashboardView: View {
     private func handleHeadingChange(_ newHeading: CLHeading?) {
         guard trackingMode == .followWithHeading || trackingMode == .drivingView else { return }
         guard newHeading != nil, let location = stateMachine.currentLocation else { return }
+        if let newHeading {
+            interpolator.receiveHeading(newHeading)
+        }
 
         let now = Date()
         guard now.timeIntervalSince(lastHeadingCameraUpdate) >= minHeadingUpdateInterval else { return }
@@ -1235,6 +1267,7 @@ struct DashboardView: View {
             guard let windowStart = historyTimeSpan.windowStart else {
                 historyRouteCache = [:]
                 selectedHistoryRoute = nil
+                historyTapCycleState = nil
                 return
             }
             
@@ -1254,9 +1287,13 @@ struct DashboardView: View {
                 // We yield every few drives to keep UI responsive
                 let rawCoords = drive.pointsChronological.map { $0.coordinate }
                 let coords = downsampleHistoryOverlayCoordinates(rawCoords)
+                let hitTestCoords = downsampleHistoryHitTestCoordinates(rawCoords)
+                let hitTestPoints = hitTestCoords.map(MKMapPoint.init)
                 newCache[drive.id] = HistoryRoute(
                     coordinates: coords,
-                    endTime: drive.endTime ?? drive.startTime
+                    endTime: drive.endTime ?? drive.startTime,
+                    hitTestPoints: hitTestPoints,
+                    hitTestRect: mapRect(for: hitTestPoints)
                 )
                 await Task.yield()
             }
@@ -1267,6 +1304,7 @@ struct DashboardView: View {
             
             if let selected = selectedHistoryRoute, newCache[selected.id] == nil {
                 selectedHistoryRoute = nil
+                historyTapCycleState = nil
             }
         }
     }
@@ -1285,6 +1323,28 @@ struct DashboardView: View {
         }
 
         let target = maxHistoryOverlayPointsPerRoute
+        let step = Double(count - 1) / Double(target - 1)
+        var result: [CLLocationCoordinate2D] = []
+        result.reserveCapacity(target)
+
+        for index in 0..<target {
+            let sourceIndex = Int(round(Double(index) * step))
+            let clampedIndex = min(max(sourceIndex, 0), count - 1)
+            result.append(coordinates[clampedIndex])
+        }
+
+        return result
+    }
+
+    private func downsampleHistoryHitTestCoordinates(
+        _ coordinates: [CLLocationCoordinate2D]
+    ) -> [CLLocationCoordinate2D] {
+        let count = coordinates.count
+        guard count > maxHistoryHitTestPointsPerRoute, maxHistoryHitTestPointsPerRoute > 2 else {
+            return coordinates
+        }
+
+        let target = maxHistoryHitTestPointsPerRoute
         let step = Double(count - 1) / Double(target - 1)
         var result: [CLLocationCoordinate2D] = []
         result.reserveCapacity(target)
@@ -1330,7 +1390,16 @@ struct DashboardView: View {
     private func handleHistoryRouteTap(at coordinate: CLLocationCoordinate2D) {
         guard canSelectHistoryRoutes else { return }
         let thresholdMeters = routeSelectionThresholdMeters
-        guard let selectedId = nearestHistoryRoute(to: coordinate, thresholdMeters: thresholdMeters) else {
+        let candidates = historyRouteCandidates(
+            to: coordinate,
+            thresholdMeters: thresholdMeters,
+            limit: 2
+        )
+        guard let selectedId = resolveSelectedHistoryRouteId(
+            from: candidates,
+            tapCoordinate: coordinate,
+            thresholdMeters: thresholdMeters
+        ) else {
             cancelRouteFocusTask()
             selectedHistoryRoute = nil
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
@@ -1341,6 +1410,7 @@ struct DashboardView: View {
         guard let selection = buildHistorySelection(for: selectedId) else {
             cancelRouteFocusTask()
             selectedHistoryRoute = nil
+            historyTapCycleState = nil
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 bottomBarDetent = .peek
             }
@@ -1466,33 +1536,90 @@ struct DashboardView: View {
         lastFocusedRouteId = routeId
     }
     
-    private func nearestHistoryRoute(
+    private func historyRouteCandidates(
         to coordinate: CLLocationCoordinate2D,
-        thresholdMeters: Double
-    ) -> UUID? {
+        thresholdMeters: Double,
+        limit: Int
+    ) -> [HistoryRouteHitCandidate] {
         let tapPoint = MKMapPoint(coordinate)
         let pointsPerMeter = MKMapPointsPerMeterAtLatitude(coordinate.latitude)
         let thresholdMapPoints = thresholdMeters * pointsPerMeter
-        
-        var bestId: UUID?
-        var bestDistance = thresholdMeters
-        
+
+        var candidates: [HistoryRouteHitCandidate] = []
+
         for (driveId, route) in historyRouteCache {
-            let coords = route.coordinates
-            guard coords.count > 1 else { continue }
-            
-            let points = coords.map { MKMapPoint($0) }
-            let rect = mapRect(for: points).insetBy(dx: -thresholdMapPoints, dy: -thresholdMapPoints)
+            guard route.hitTestPoints.count > 1 else { continue }
+
+            let rect = route.hitTestRect.insetBy(dx: -thresholdMapPoints, dy: -thresholdMapPoints)
             guard rect.contains(tapPoint) else { continue }
-            
-            let distance = distanceFrom(point: tapPoint, to: points)
-            if distance < bestDistance {
-                bestDistance = distance
-                bestId = driveId
-            }
+
+            let distanceMapPoints = distanceFrom(point: tapPoint, to: route.hitTestPoints)
+            let distanceMeters = distanceMapPoints / pointsPerMeter
+            guard distanceMeters <= thresholdMeters else { continue }
+
+            candidates.append(
+                HistoryRouteHitCandidate(
+                    id: driveId,
+                    distanceMeters: distanceMeters,
+                    endTime: route.endTime
+                )
+            )
         }
-        
-        return bestId
+
+        return candidates
+            .sorted { lhs, rhs in
+                if abs(lhs.distanceMeters - rhs.distanceMeters) > 0.5 {
+                    return lhs.distanceMeters < rhs.distanceMeters
+                }
+                return lhs.endTime > rhs.endTime
+            }
+            .prefix(max(1, limit))
+            .map { $0 }
+    }
+
+    private func resolveSelectedHistoryRouteId(
+        from candidates: [HistoryRouteHitCandidate],
+        tapCoordinate: CLLocationCoordinate2D,
+        thresholdMeters: Double
+    ) -> UUID? {
+        guard !candidates.isEmpty else {
+            historyTapCycleState = nil
+            return nil
+        }
+
+        let topIds = Array(candidates.prefix(2).map(\.id))
+        let now = Date()
+
+        guard topIds.count == 2 else {
+            historyTapCycleState = nil
+            return topIds.first
+        }
+
+        let allowedAnchorDistance = max(
+            tapCycleAnchorMinDistanceMeters,
+            thresholdMeters * 0.45
+        )
+
+        if var cycleState = historyTapCycleState,
+           cycleState.candidateIds == topIds,
+           now.timeIntervalSince(cycleState.timestamp) <= tapCycleMaxInterval,
+           centerDistanceMeters(from: cycleState.anchor, to: tapCoordinate) <= allowedAnchorDistance {
+            let selectedId = cycleState.candidateIds[cycleState.nextIndex]
+            cycleState.nextIndex = (cycleState.nextIndex + 1) % cycleState.candidateIds.count
+            cycleState.anchor = tapCoordinate
+            cycleState.timestamp = now
+            historyTapCycleState = cycleState
+            return selectedId
+        }
+
+        // First tap in a cluster selects the nearest route.
+        historyTapCycleState = HistoryRouteTapCycleState(
+            anchor: tapCoordinate,
+            timestamp: now,
+            candidateIds: topIds,
+            nextIndex: 1
+        )
+        return topIds[0]
     }
     
     private func distanceFrom(point: MKMapPoint, to points: [MKMapPoint]) -> Double {
@@ -1641,6 +1768,21 @@ struct DashboardView: View {
 private struct HistoryRoute {
     let coordinates: [CLLocationCoordinate2D]
     let endTime: Date
+    let hitTestPoints: [MKMapPoint]
+    let hitTestRect: MKMapRect
+}
+
+private struct HistoryRouteHitCandidate {
+    let id: UUID
+    let distanceMeters: Double
+    let endTime: Date
+}
+
+private struct HistoryRouteTapCycleState {
+    var anchor: CLLocationCoordinate2D
+    var timestamp: Date
+    let candidateIds: [UUID]
+    var nextIndex: Int
 }
 
 // MARK: - Dwell Status Bubble

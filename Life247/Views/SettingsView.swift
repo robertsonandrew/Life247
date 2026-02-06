@@ -149,18 +149,13 @@ private struct SettingsDivider: View {
 
 /// App settings view with clean, compact design
 struct SettingsView: View {
-    @EnvironmentObject private var syncService: DriveSyncService
-    @AppStorage("showSpeedHeatMap") private var showSpeedHeatMap = false
-    @AppStorage("showSpeedTrace") private var showSpeedTrace = true
+    @AppStorage("notifyOnDriveStart") private var notifyOnStart = true
+    @AppStorage("notifyOnDriveEnd") private var notifyOnEnd = true
+    @AppStorage("notifyDriveStartSound") private var notifyDriveStartSoundRaw = NotificationSoundOption.triTone.rawValue
+    @AppStorage("notifyDriveEndSound") private var notifyDriveEndSoundRaw = NotificationSoundOption.chord.rawValue
     @AppStorage("showPlacesOnMap") private var showPlacesOnMap = true
-    @AppStorage("showPlaceCenterMarkers") private var showPlaceCenterMarkers = false
-    @AppStorage("showMapStyleButton") private var showMapStyleButton = false
     @AppStorage("defaultZoomLevel") private var defaultZoomLevel: String = MapZoomLevel.area.rawValue
     @AppStorage("historyTimeSpan") private var historyTimeSpan: String = HistoryTimeSpan.off.rawValue
-    @AppStorage("notifyOnStart") private var notifyOnStart = true
-    @AppStorage("notifyOnEnd") private var notifyOnEnd = true
-    
-    @Environment(\.modelContext) private var modelContext
 
     private var appVersionDisplay: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -175,6 +170,35 @@ struct SettingsView: View {
             return "unknown"
         }
         return value
+    }
+
+    private var startSoundOption: NotificationSoundOption {
+        NotificationSoundOption(rawValue: notifyDriveStartSoundRaw) ?? .triTone
+    }
+
+    private var endSoundOption: NotificationSoundOption {
+        NotificationSoundOption(rawValue: notifyDriveEndSoundRaw) ?? .chord
+    }
+
+    private var notificationsSubtitle: String {
+        let startText = notifyOnStart ? startSoundOption.label : "Off"
+        let endText = notifyOnEnd ? endSoundOption.label : "Off"
+        return "Start: \(startText), End: \(endText)"
+    }
+
+    private var zoomLevelOption: MapZoomLevel {
+        MapZoomLevel(rawValue: defaultZoomLevel) ?? .area
+    }
+
+    private var historyTimeSpanOption: HistoryTimeSpan {
+        HistoryTimeSpan(rawValue: historyTimeSpan) ?? .off
+    }
+
+    private var mapAppearanceSubtitle: String {
+        let placesText = showPlacesOnMap ? "Places On" : "Places Off"
+        let historyText = "History \(historyTimeSpanOption.label)"
+        let zoomText = "Zoom \(zoomLevelOption.label)"
+        return "\(placesText), \(historyText), \(zoomText)"
     }
     
     var body: some View {
@@ -197,75 +221,31 @@ struct SettingsView: View {
                         PlacesView()
                     }
                     
-                    // Notifications
-                    SettingsSectionHeader(title: "Notifications")
-                    
-                    NotificationToggleRow(
-                        title: "Drive Started",
-                        isOn: $notifyOnStart,
-                        isStart: true
-                    )
+                    // Preferences
+                    SettingsSectionHeader(title: "Preferences")
+
+                    SettingsNavRow(
+                        title: "Notifications",
+                        subtitle: notificationsSubtitle
+                    ) {
+                        NotificationsSettingsView()
+                    }
                     SettingsDivider()
-                    NotificationToggleRow(
-                        title: "Drive Ended",
-                        isOn: $notifyOnEnd,
-                        isStart: false
-                    )
-                    
-                    // Display
-                    SettingsSectionHeader(title: "Display")
-                    
-                    SettingsToggleRow(
-                        title: "Show Saved Places",
-                        subtitle: "Display place geofence circles on map",
-                        isOn: $showPlacesOnMap
-                    )
-                    SettingsDivider()
-                    SettingsToggleRow(
-                        title: "Place Center Markers",
-                        subtitle: "Show subtle center dots for saved places",
-                        isOn: $showPlaceCenterMarkers
-                    )
-                    SettingsDivider()
-                    SettingsToggleRow(
-                        title: "Map Style Button",
-                        subtitle: "Show map style picker button on dashboard",
-                        isOn: $showMapStyleButton
-                    )
-                    SettingsDivider()
-                    SettingsToggleRow(
-                        title: "Speed Heat Map",
-                        subtitle: "Color routes by speed",
-                        isOn: $showSpeedHeatMap
-                    )
-                    SettingsDivider()
-                    SettingsToggleRow(
-                        title: "Speed Heatmap in History",
-                        subtitle: "Color mini traces by speed on drive cards",
-                        isOn: $showSpeedTrace
-                    )
-                    SettingsDivider()
-                    SettingsPickerRow(
-                        title: "Default Zoom",
-                        selection: $defaultZoomLevel,
-                        options: MapZoomLevel.allCases.map { ($0.label, $0.rawValue) }
-                    )
-                    SettingsDivider()
-                    SettingsPickerRow(
-                        title: "History Overlay",
-                        subtitle: "Show past routes on map",
-                        selection: $historyTimeSpan,
-                        options: HistoryTimeSpan.allCases.map { ($0.label, $0.rawValue) }
-                    )
-                    
+                    SettingsNavRow(
+                        title: "Map Appearance",
+                        subtitle: mapAppearanceSubtitle
+                    ) {
+                        MapAppearanceSettingsView()
+                    }
+
                     // Backup
                     SettingsSectionHeader(title: "Backup")
-                    
+
                     SyncStatusRow()
-                    
+
                     // About
                     SettingsSectionHeader(title: "About")
-                    
+
                     SettingsValueRow(title: "Version", value: appVersionDisplay)
                     SettingsDivider()
                     SettingsValueRow(title: "Git", value: gitCommitDisplay)
@@ -281,6 +261,116 @@ struct SettingsView: View {
 }
 
 // MARK: - Isolated Subviews (Prevent Parent Re-renders)
+
+private struct NotificationsSettingsView: View {
+    @AppStorage("notifyOnDriveStart") private var notifyOnStart = true
+    @AppStorage("notifyOnDriveEnd") private var notifyOnEnd = true
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                SettingsSectionHeader(title: "Drive Events")
+
+                NotificationToggleRow(
+                    title: "Drive Started",
+                    isOn: $notifyOnStart,
+                    isStart: true
+                )
+                SettingsDivider()
+                NotificationSoundPickerRow(
+                    title: "Start Sound",
+                    isStart: true
+                )
+                SettingsDivider()
+                NotificationToggleRow(
+                    title: "Drive Ended",
+                    isOn: $notifyOnEnd,
+                    isStart: false
+                )
+                SettingsDivider()
+                NotificationSoundPickerRow(
+                    title: "End Sound",
+                    isStart: false
+                )
+
+                Spacer(minLength: 100)
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+        .bottomBarPadding()
+        .navigationTitle("Notifications")
+    }
+}
+
+private struct MapAppearanceSettingsView: View {
+    @AppStorage("showSpeedHeatMap") private var showSpeedHeatMap = false
+    @AppStorage("showSpeedTrace") private var showSpeedTrace = true
+    @AppStorage("showPlacesOnMap") private var showPlacesOnMap = true
+    @AppStorage("showPlaceCenterMarkers") private var showPlaceCenterMarkers = false
+    @AppStorage("showMapStyleButton") private var showMapStyleButton = false
+    @AppStorage("defaultZoomLevel") private var defaultZoomLevel: String = MapZoomLevel.area.rawValue
+    @AppStorage("historyTimeSpan") private var historyTimeSpan: String = HistoryTimeSpan.off.rawValue
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                SettingsSectionHeader(title: "Map")
+
+                SettingsToggleRow(
+                    title: "Show Saved Places",
+                    subtitle: "Display place geofence circles on map",
+                    isOn: $showPlacesOnMap
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    title: "Place Center Markers",
+                    subtitle: "Show subtle center dots for saved places",
+                    isOn: $showPlaceCenterMarkers
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    title: "Map Style Button",
+                    subtitle: "Show map style picker button on dashboard",
+                    isOn: $showMapStyleButton
+                )
+
+                SettingsSectionHeader(title: "Routes")
+
+                SettingsToggleRow(
+                    title: "Speed Heat Map",
+                    subtitle: "Color routes by speed",
+                    isOn: $showSpeedHeatMap
+                )
+                SettingsDivider()
+                SettingsToggleRow(
+                    title: "Speed Heatmap in History",
+                    subtitle: "Color mini traces by speed on drive cards",
+                    isOn: $showSpeedTrace
+                )
+                SettingsDivider()
+                SettingsPickerRow(
+                    title: "History Overlay",
+                    subtitle: "Show past routes on map",
+                    selection: $historyTimeSpan,
+                    options: HistoryTimeSpan.allCases.map { ($0.label, $0.rawValue) }
+                )
+
+                SettingsSectionHeader(title: "Camera")
+
+                SettingsPickerRow(
+                    title: "Default Zoom",
+                    selection: $defaultZoomLevel,
+                    options: MapZoomLevel.allCases.map { ($0.label, $0.rawValue) }
+                )
+
+                Spacer(minLength: 100)
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+        .bottomBarPadding()
+        .navigationTitle("Map Appearance")
+    }
+}
 
 /// Isolated airplane mode toggle - only re-renders when its state changes
 private struct AirplaneModeToggleRow: View {
@@ -356,6 +446,61 @@ private struct NotificationToggleRow: View {
                 NotificationService.shared.notifyOnEnd = false
             }
         }
+    }
+}
+
+/// Isolated notification sound picker for start/end events
+private struct NotificationSoundPickerRow: View {
+    let title: String
+    let isStart: Bool
+    @ObservedObject private var notificationService = NotificationService.shared
+
+    private var selection: Binding<NotificationSoundOption> {
+        Binding(
+            get: {
+                isStart ? notificationService.startSound : notificationService.endSound
+            },
+            set: { newValue in
+                if isStart {
+                    notificationService.startSound = newValue
+                } else {
+                    notificationService.endSound = newValue
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.body)
+            Spacer()
+            Picker("", selection: selection) {
+                ForEach(NotificationSoundOption.allCases, id: \.self) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+
+            Button {
+                let sound = isStart ? notificationService.startSound : notificationService.endSound
+                Task { @MainActor in
+                    notificationService.preview(sound: sound)
+                }
+            } label: {
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Preview sound")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
     }
 }
 

@@ -1680,10 +1680,19 @@ final class DriveStateMachine {
             safetyTimer?.cancel()
             safetyTimer = nil
             
-            // Start post-drive monitoring grace period.
-            // This keeps high-accuracy tracking active briefly to detect continued driving
-            // in case the drive ended due to a false arrival (e.g., passing through geofence).
-            startPostDriveMonitoring()
+            if UIApplication.shared.applicationState == .active {
+                // Start post-drive monitoring grace period in foreground only.
+                // In background/inactive, timers and callbacks are suspension-prone, which can
+                // leave the location indicator stuck until the app is reopened.
+                startPostDriveMonitoring()
+            } else {
+                // Deterministic teardown for background-ended drives.
+                isPostDriveMonitoring = false
+                postDriveMonitoringDeadline = nil
+                locationManager?.disableHighAccuracy(reason: "driving")
+                resetOneShotDebounce()
+                logger.info("[POST-DRIVE] Ended while backgrounded - disabled high-accuracy immediately")
+            }
             
             // Move back to idle after a brief delay using proper transition.
             // This ensures SwiftUI onChange observers fire correctly.
@@ -2091,4 +2100,3 @@ final class DriveStateMachine {
         }
     }
 }
-
