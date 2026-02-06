@@ -128,7 +128,17 @@ final class Drive {
     
     /// Log entries sorted chronologically
     var logEntriesChronological: [DriveLogEntry] {
-        logEntries.sorted { $0.timestamp < $1.timestamp }
+        logEntries.sorted { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp {
+                return lhs.timestamp < rhs.timestamp
+            }
+            let lhsSeq = lhs.sequenceNumber ?? Int.max
+            let rhsSeq = rhs.sequenceNumber ?? Int.max
+            if lhsSeq != rhsSeq {
+                return lhsSeq < rhsSeq
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
     }
     
     // MARK: - System Helpers

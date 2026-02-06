@@ -16,7 +16,9 @@ struct DriveInspectorView: View {
     @State private var selectedCategory: LogCategory? = nil
     @State private var showTimelineSheet = false
     @State private var showingShareSheet = false
+    @State private var shareItems: [Any] = []
     @State private var cachedExportText: String?
+    @State private var cachedExportJSONL: String?
     @State private var isGeneratingExport = false
     
     private var filteredEntries: [DriveLogEntry] {
@@ -45,17 +47,7 @@ struct DriveInspectorView: View {
                         .progressViewStyle(.circular)
                 } else {
                     Button {
-                        if cachedExportText != nil {
-                            showingShareSheet = true
-                        } else {
-                            // Generate on-demand if not cached
-                            Task {
-                                isGeneratingExport = true
-                                cachedExportText = await generateExportTextAsync()
-                                isGeneratingExport = false
-                                showingShareSheet = true
-                            }
-                        }
+                        Task { await prepareShareExport() }
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
@@ -63,8 +55,8 @@ struct DriveInspectorView: View {
             }
         }
         .sheet(isPresented: $showingShareSheet) {
-            if let text = cachedExportText {
-                ShareSheet(activityItems: [text])
+            if !shareItems.isEmpty {
+                ShareSheet(activityItems: shareItems)
             }
         }
         .sheet(isPresented: $showTimelineSheet) {
@@ -74,8 +66,11 @@ struct DriveInspectorView: View {
             )
         }
         .task {
-            // Pre-generate export text in background on view appear
-            cachedExportText = await generateExportTextAsync()
+            // Pre-generate both human report and machine-readable JSONL.
+            async let reportText = generateExportTextAsync()
+            async let reportJSONL = generateExportJSONLAsync()
+            cachedExportText = await reportText
+            cachedExportJSONL = await reportJSONL
         }
     }
 
@@ -296,77 +291,98 @@ struct DriveInspectorView: View {
     }
     
     // MARK: - Export
-    
-    private func generateExportText() -> String {
-        var lines: [String] = []
-        
-        lines.append("═══════════════════════════════════════")
-        lines.append("DRIVE INSPECTOR REPORT")
-        lines.append("Generated: \(Date().formatted())")
-        lines.append("═══════════════════════════════════════")
-        lines.append("")
-        
-        // Drive ID
-        lines.append("Drive ID: \(drive.shortId)")
-        lines.append("Start: \(drive.startTime.formatted())")
-        if let endTime = drive.endTime {
-            lines.append("End: \(endTime.formatted())")
+
+    private struct JSONLTimelineEvent: Codable {
+        let schemaVersion: Int
+        let driveId: String
+        let driveShortId: String
+        let seq: Int
+        let eventId: String
+        let timestamp: String
+        let relativeSeconds: Double
+        let category: String
+        let eventType: String
+        let message: String
+        let reasonCode: String
+        let stateFrom: String?
+        let stateTo: String?
+        let trigger: String?
+        let appState: String?
+        let accM: Double?
+        let speedMph: Double?
+        let locAgeS: Double?
+        let gapS: Double?
+        let metadata: [String: String]
+
+        enum CodingKeys: String, CodingKey {
+            case schemaVersion = "schema_version"
+            case driveId = "drive_id"
+            case driveShortId = "drive_short_id"
+            case seq
+            case eventId = "event_id"
+            case timestamp
+            case relativeSeconds = "relative_seconds"
+            case category
+            case eventType = "event_type"
+            case message
+            case reasonCode = "reason_code"
+            case stateFrom = "state_from"
+            case stateTo = "state_to"
+            case trigger
+            case appState = "app_state"
+            case accM = "acc_m"
+            case speedMph = "speed_mph"
+            case locAgeS = "loc_age_s"
+            case gapS = "gap_s"
+            case metadata
         }
-        lines.append("")
-        
-        // Summary
-        lines.append("─── SUMMARY ───")
-        lines.append("Duration: \(drive.formattedDuration)")
-        lines.append("Distance: \(drive.formattedDistance)")
-        lines.append("Avg Speed: \(String(format: "%.0f mph", drive.averageSpeedMPH))")
-        lines.append("Max Speed: \(String(format: "%.0f mph", drive.maxSpeedMPH))")
-        if let latency = drive.detectionLatency {
-            lines.append("Detection Latency: \(String(format: "%.1fs", latency))")
-        }
-        if let confirmLatency = drive.confirmationLatency {
-            lines.append("Confirmation Latency: \(String(format: "%.1fs", confirmLatency))")
-        }
-        lines.append("Samples: \(drive.locationSampleCount)")
-        lines.append("Dropped: \(drive.droppedSampleCount)")
-        lines.append("GPS Pauses: \(drive.locationPauseCount)")
-        lines.append("Max Gap: \(String(format: "%.0fs", drive.maxGapBetweenSamples))")
-        lines.append("Gap Skips: \(drive.distanceGapSkipCount)")
-        lines.append("Skipped Distance: \(String(format: "%.2f mi", drive.distanceGapSkippedMeters / 1609.344))")
-        lines.append("")
-        
-        // System Context
-        lines.append("─── SYSTEM CONTEXT ───")
-        lines.append("iOS: \(drive.iosVersion ?? "Unknown")")
-        lines.append("Device: \(deviceName(for: drive.deviceModel))")
-        lines.append("App Version: \(drive.appVersion ?? "Unknown")")
-        lines.append("Battery: \(batteryString)")
-        lines.append("Start Reason: \(drive.startReason?.rawValue ?? "Unknown")")
-        lines.append("End Reason: \(drive.endReason?.rawValue ?? "Unknown")")
-        if drive.lowPowerModeAtStart == true {
-            lines.append("⚠️ Low Power Mode was ON")
-        }
-        lines.append("")
-        
-        // Timeline
-        lines.append("─── TIMELINE (\(drive.logEntriesChronological.count) events) ───")
-        for entry in drive.logEntriesChronological {
-            lines.append("\(entry.formattedTime) [\(entry.category.label)] \(entry.message)")
-            if let metadata = entry.metadata {
-                for (key, value) in metadata.sorted(by: { $0.key < $1.key }) {
-                    lines.append("    \(key): \(value)")
-                }
-            }
-        }
-        
-        lines.append("")
-        lines.append("═══════════════════════════════════════")
-        lines.append("END OF REPORT")
-        lines.append("═══════════════════════════════════════")
-        
-        return lines.joined(separator: "\n")
     }
-    
-    /// Async version for background pre-computation
+
+    @MainActor
+    private func prepareShareExport() async {
+        isGeneratingExport = true
+        defer { isGeneratingExport = false }
+
+        let reportText: String
+        if let cachedExportText {
+            reportText = cachedExportText
+        } else {
+            let generated = await generateExportTextAsync()
+            cachedExportText = generated
+            reportText = generated
+        }
+
+        let reportJSONL: String
+        if let cachedExportJSONL {
+            reportJSONL = cachedExportJSONL
+        } else {
+            let generated = await generateExportJSONLAsync()
+            cachedExportJSONL = generated
+            reportJSONL = generated
+        }
+
+        shareItems = writeShareItems(reportText: reportText, reportJSONL: reportJSONL)
+        showingShareSheet = true
+    }
+
+    private func writeShareItems(reportText: String, reportJSONL: String) -> [Any] {
+        let tempDir = FileManager.default.temporaryDirectory
+        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let baseName = "drive_\(drive.shortId)_\(timestamp)"
+        let textURL = tempDir.appendingPathComponent("\(baseName).txt")
+        let jsonlURL = tempDir.appendingPathComponent("\(baseName).jsonl")
+
+        do {
+            try reportText.write(to: textURL, atomically: true, encoding: .utf8)
+            try reportJSONL.write(to: jsonlURL, atomically: true, encoding: .utf8)
+            return [textURL, jsonlURL]
+        } catch {
+            // Fallback keeps sharing functional even if temp file writes fail.
+            return [reportText, reportJSONL]
+        }
+    }
+
+    /// Async text report generation for background pre-computation.
     private func generateExportTextAsync() async -> String {
         // Capture necessary values before going off main thread
         let driveShortId = drive.shortId
@@ -391,8 +407,16 @@ struct DriveInspectorView: View {
         let startReason = drive.startReason?.rawValue
         let endReason = drive.endReason?.rawValue
         let lowPowerMode = drive.lowPowerModeAtStart
-        let chronologicalEntries = drive.logEntriesChronological.map { entry -> (time: String, category: String, message: String, metadata: [String: String]?) in
-            (entry.formattedTime, entry.category.label, entry.message, entry.metadata)
+        let chronologicalEntries = drive.logEntriesChronological.enumerated().map { index, entry -> (index: Int, seq: Int, time: String, category: String, eventType: String, message: String, metadata: [String: String]?) in
+            (
+                index: index + 1,
+                seq: entry.sequenceNumber ?? 0,
+                time: entry.formattedTime,
+                category: entry.category.label,
+                eventType: entry.eventType,
+                message: entry.message,
+                metadata: entry.metadata
+            )
         }
         let deviceNameStr = deviceName(for: deviceModel)
         
@@ -450,7 +474,8 @@ struct DriveInspectorView: View {
             // Timeline
             lines.append("─── TIMELINE (\(chronologicalEntries.count) events) ───")
             for entry in chronologicalEntries {
-                lines.append("\(entry.time) [\(entry.category)] \(entry.message)")
+                let eventSeq = entry.seq > 0 ? entry.seq : entry.index
+                lines.append("\(entry.time) #\(eventSeq) [\(entry.category)] \(entry.message) | type: \(entry.eventType)")
                 if let metadata = entry.metadata {
                     for (key, value) in metadata.sorted(by: { $0.key < $1.key }) {
                         lines.append("    \(key): \(value)")
@@ -465,6 +490,104 @@ struct DriveInspectorView: View {
             
             return lines.joined(separator: "\n")
         }.value
+    }
+
+    /// Async JSON Lines export with normalized high-signal fields.
+    private func generateExportJSONLAsync() async -> String {
+        let driveId = drive.id.uuidString
+        let driveShortId = drive.shortId
+        let driveStartTime = drive.startTime
+        let entries = drive.logEntriesChronological.enumerated().map { index, entry in
+            (
+                index: index + 1,
+                seq: entry.sequenceNumber ?? 0,
+                eventId: entry.id.uuidString,
+                timestamp: entry.timestamp,
+                category: entry.category.rawValue,
+                eventType: entry.eventType,
+                message: entry.message,
+                metadata: entry.metadata ?? [:]
+            )
+        }
+
+        return await Task.detached(priority: .userInitiated) {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+
+            var lines: [String] = []
+            lines.reserveCapacity(entries.count)
+
+            for entry in entries {
+                let meta = entry.metadata
+                let seq = entry.seq > 0 ? entry.seq : entry.index
+                let reasonCode = Self.firstValue(
+                    for: ["reason_code", "reason", "rule", "input_startReason", "input_endReason"],
+                    in: meta
+                ) ?? entry.eventType
+
+                let exportEvent = JSONLTimelineEvent(
+                    schemaVersion: 1,
+                    driveId: driveId,
+                    driveShortId: driveShortId,
+                    seq: seq,
+                    eventId: entry.eventId,
+                    timestamp: iso.string(from: entry.timestamp),
+                    relativeSeconds: max(0, entry.timestamp.timeIntervalSince(driveStartTime)),
+                    category: entry.category,
+                    eventType: entry.eventType,
+                    message: entry.message,
+                    reasonCode: reasonCode,
+                    stateFrom: Self.firstValue(for: ["state_from", "fromState", "input_fromState"], in: meta),
+                    stateTo: Self.firstValue(for: ["state_to", "toState", "input_toState"], in: meta),
+                    trigger: Self.firstValue(for: ["trigger", "input_trigger"], in: meta),
+                    appState: Self.firstValue(for: ["app_state", "appState", "state", "input_appState"], in: meta),
+                    accM: Self.firstDouble(for: ["acc_m", "accuracyM", "accuracy"], in: meta),
+                    speedMph: Self.firstDouble(for: ["speed_mph", "speedMPH", "speed", "input_speed"], in: meta),
+                    locAgeS: Self.firstDouble(for: ["loc_age_s", "ageSeconds", "age"], in: meta),
+                    gapS: Self.firstDouble(for: ["gap_s", "gapSeconds"], in: meta),
+                    metadata: meta
+                )
+
+                if let data = try? encoder.encode(exportEvent),
+                   let line = String(data: data, encoding: .utf8) {
+                    lines.append(line)
+                }
+            }
+            return lines.joined(separator: "\n")
+        }.value
+    }
+
+    private static func firstValue(for keys: [String], in metadata: [String: String]) -> String? {
+        for key in keys {
+            if let value = metadata[key], !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func firstDouble(for keys: [String], in metadata: [String: String]) -> Double? {
+        for key in keys {
+            guard let raw = metadata[key], !raw.isEmpty else { continue }
+            if let value = parseFirstDouble(raw) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func parseFirstDouble(_ raw: String) -> Double? {
+        let tokens = raw.split { ch in
+            !(ch.isNumber || ch == "." || ch == "-")
+        }
+        for token in tokens {
+            if let value = Double(token) {
+                return value
+            }
+        }
+        return nil
     }
     
     // MARK: - Helpers
@@ -636,8 +759,9 @@ struct TimelineSheetView: View {
     }
     
     private func copyAllFiltered() {
-        let lines = entries.map { entry -> String in
-            var text = "[\(entry.formattedTime)] \(entry.category.emoji) \(entry.message)"
+        let lines = entries.enumerated().map { index, entry -> String in
+            let seq = (entry.sequenceNumber ?? 0) > 0 ? (entry.sequenceNumber ?? 0) : index + 1
+            var text = "[\(entry.formattedTime) #\(seq)] \(entry.category.emoji) \(entry.message) | type: \(entry.eventType)"
             if let metadata = entry.metadata {
                 let metaStr = metadata.sorted(by: { $0.key < $1.key })
                     .map { "\($0.key): \($0.value)" }
@@ -695,6 +819,13 @@ struct TimelineSheetRow: View {
                 .padding(.vertical, 2)
                 .background(categoryColor.opacity(0.15))
                 .cornerRadius(4)
+
+                if let sequenceNumber = entry.sequenceNumber, sequenceNumber > 0 {
+                    Text("#\(sequenceNumber)")
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
                 
                 Spacer()
                 
@@ -849,7 +980,8 @@ struct TimelineSheetRow: View {
     }
     
     private func copyEntryAsText() {
-        var text = "[\(entry.formattedTime)] \(entry.category.emoji) \(entry.message)"
+        let seq = (entry.sequenceNumber ?? 0) > 0 ? " #\(entry.sequenceNumber ?? 0)" : ""
+        var text = "[\(entry.formattedTime)\(seq)] \(entry.category.emoji) \(entry.message) | type: \(entry.eventType)"
         if let metadata = entry.metadata, !metadata.isEmpty {
             let metaStr = metadata.sorted(by: { $0.key < $1.key })
                 .map { "\(humanReadableKey($0.key)): \($0.value)" }
@@ -860,9 +992,13 @@ struct TimelineSheetRow: View {
     }
     
     private func copyEntryAsJSON() {
+        let sequenceNumber = entry.sequenceNumber ?? 0
         var dict: [String: Any] = [
+            "event_id": entry.id.uuidString,
+            "seq": sequenceNumber,
             "timestamp": entry.timestamp.ISO8601Format(),
-            "category": entry.category.label,
+            "category": entry.category.rawValue,
+            "event_type": entry.eventType,
             "message": entry.message
         ]
         if let metadata = entry.metadata {

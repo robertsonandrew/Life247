@@ -705,6 +705,11 @@ final class DriveStateMachine {
         // Clear motion flags when motion is non-automotive
         hasHighConfidenceMotion = false
         hasRecentAutomotiveMotion = false
+
+        // Treat non-automotive as lightweight "possibly on foot" evidence.
+        // This helps drive-end logic in background scenarios where iOS may report
+        // non-automotive but never emits a strong .onFoot classification.
+        lastOnFootAt = Date()
         
         // Log motion for timeline
         driveLogger.log(.motion, type: "motion_not_automotive", message: "Non-automotive motion detected")
@@ -1401,6 +1406,28 @@ final class DriveStateMachine {
                     let age = Date().timeIntervalSince(location.timestamp)
                     let speedMPH = max(0, speedInMPH(for: location))
                     if age > pendingArrivalMaxLocationAgeSeconds {
+                        // If visit arrival already fired and we're backgrounded with stale GPS,
+                        // prefer ending over resuming to avoid multi-hour false "driving" sessions
+                        // while user is parked and walking indoors.
+                        if pendingEndReason == .visitArrival,
+                           UIApplication.shared.applicationState != .active {
+                            logger.info("Pending arrival confirmed via visit+stale fallback in background (age \(Int(age))s)")
+                            var place: Place?
+                            if let loc = currentLocation {
+                                place = placeVisitManager.bestMatchingPlace(for: loc.coordinate)
+                                captureEndSnapshot(location: loc, place: place)
+                            } else {
+                                captureEndSnapshot()
+                            }
+                            logTraceIfEnabled(
+                                type: "pending_arrival_accept",
+                                message: "Accepted pending arrival (visit+stale fallback)",
+                                metadata: stateSnapshotMetadata()
+                            )
+                            transition(to: .ended, trigger: "arrival_confirmed_visit_stale_fallback")
+                            return
+                        }
+
                         logger.info("Pending arrival cancelled: stale location (age \(Int(age))s)")
                         var meta = stateSnapshotMetadata()
                         meta["reason"] = "stale_location"

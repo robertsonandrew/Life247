@@ -16,6 +16,7 @@ final class DriveLogger {
     
     private weak var activeDrive: Drive?
     private var modelContext: ModelContext?
+    private var nextSequenceNumber: Int = 1
     
     // MARK: - Lifecycle
     
@@ -23,6 +24,7 @@ final class DriveLogger {
     func attach(to drive: Drive, context: ModelContext) {
         self.activeDrive = drive
         self.modelContext = context
+        self.nextSequenceNumber = (drive.logEntries.compactMap(\.sequenceNumber).max() ?? 0) + 1
         
         log(.system, type: "logger_attached", message: "DriveLogger attached to drive \(drive.shortId)")
     }
@@ -34,6 +36,7 @@ final class DriveLogger {
         }
         self.activeDrive = nil
         self.modelContext = nil
+        self.nextSequenceNumber = 1
     }
     
     // MARK: - Logging
@@ -46,13 +49,20 @@ final class DriveLogger {
         metadata: [String: String] = [:]
     ) {
         guard let drive = activeDrive else { return }
-        
+
+        var enriched = metadata
+        if category == .decision {
+            enriched["reason_code"] = enriched["reason_code"] ?? type
+        }
+
         let entry = DriveLogEntry(
+            sequenceNumber: nextSequenceNumber,
             category: category,
             eventType: type,
             message: message,
-            metadata: metadata.isEmpty ? nil : metadata
+            metadata: enriched.isEmpty ? nil : enriched
         )
+        nextSequenceNumber += 1
         entry.drive = drive
         // Make persistence explicit. Relying solely on relationship insertion can be brittle,
         // especially during background execution.
@@ -85,7 +95,15 @@ final class DriveLogger {
     
     /// Log app state change (foreground/background)
     func logAppStateChange(to state: String) {
-        log(.system, type: "app_state_changed", message: "App \(state)", metadata: ["state": state])
+        log(
+            .system,
+            type: "app_state_changed",
+            message: "App \(state)",
+            metadata: [
+                "state": state,
+                "app_state": state
+            ]
+        )
     }
     
     /// Log motion activity change
@@ -136,7 +154,10 @@ final class DriveLogger {
             message: message,
             metadata: [
                 "accuracy": String(format: "%.1f", accuracy),
+                "acc_m": String(format: "%.1f", accuracy),
                 "speed": String(format: "%.2f", speed),
+                "speed_mps": String(format: "%.2f", speed),
+                "speed_mph": String(format: "%.1f", speed * 2.23694),
                 "isFirstFix": String(isFirstFix)
             ]
         )
@@ -159,7 +180,10 @@ final class DriveLogger {
         logAnomaly(
             "gps_gap",
             message: "GPS gap detected: \(String(format: "%.0f", gapDuration))s",
-            metadata: ["gapSeconds": String(format: "%.1f", gapDuration)]
+            metadata: [
+                "gapSeconds": String(format: "%.1f", gapDuration),
+                "gap_s": String(format: "%.1f", gapDuration)
+            ]
         )
         
         // Update max gap if this is longer
@@ -186,6 +210,8 @@ final class DriveLogger {
         var meta = metadata
         meta["fromState"] = from
         meta["toState"] = to
+        meta["state_from"] = from
+        meta["state_to"] = to
         meta["trigger"] = trigger
         log(
             .decision,

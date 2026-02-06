@@ -20,11 +20,24 @@ struct DriveDecision: Codable {
     func asMetadata() -> [String: String] {
         var result: [String: String] = [
             "rule": rule,
-            "outcome": outcome
+            "outcome": outcome,
+            "reason_code": rule,
+            "decision_outcome": outcome
         ]
         // Flatten inputs with "input_" prefix
         for (key, value) in inputs {
             result["input_\(key)"] = value
+        }
+
+        // Canonical aliases for common decision fields.
+        if let from = inputs["fromState"] {
+            result["state_from"] = from
+        }
+        if let to = inputs["toState"] {
+            result["state_to"] = to
+        }
+        if let trigger = inputs["trigger"] {
+            result["trigger"] = trigger
         }
         return result
     }

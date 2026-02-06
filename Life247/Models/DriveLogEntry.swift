@@ -14,6 +14,7 @@ import SwiftData
 @Model
 final class DriveLogEntry {
     var id: UUID
+    var sequenceNumber: Int?       // Monotonic per-drive event sequence (1-based)
     var timestamp: Date
     var categoryRaw: String         // LogCategory raw value (SwiftData workaround)
     var eventType: String           // e.g. "app_backgrounded", "motion_automotive"
@@ -25,6 +26,7 @@ final class DriveLogEntry {
     
     init(
         id: UUID = UUID(),
+        sequenceNumber: Int? = nil,
         timestamp: Date = Date(),
         category: LogCategory,
         eventType: String,
@@ -32,6 +34,7 @@ final class DriveLogEntry {
         metadata: [String: String]? = nil
     ) {
         self.id = id
+        self.sequenceNumber = sequenceNumber
         self.timestamp = timestamp
         self.categoryRaw = category.rawValue
         self.eventType = eventType

@@ -164,10 +164,10 @@ struct SettingsView: View {
     }
 
     private var gitCommitDisplay: String {
-        let raw = Bundle.main.object(forInfoDictionaryKey: "GitCommitHash") as? String ?? "unknown"
+        let raw = Bundle.main.object(forInfoDictionaryKey: "GitCommitHash") as? String ?? ""
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.isEmpty {
-            return "unknown"
+        if value.isEmpty || value.caseInsensitiveCompare("unknown") == .orderedSame {
+            return "not embedded"
         }
         return value
     }

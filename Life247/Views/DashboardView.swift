@@ -587,10 +587,11 @@ struct DashboardView: View {
             let rawSpeed = stateMachine.currentLocation?.speed ?? 0
             let speedMPS = max(0, interpolator.displaySpeed > 0 ? interpolator.displaySpeed : rawSpeed)
             if let coordinate = coneCoordinate {
-                let fallbackHeading = liveResolvedHeading ?? currentDeviceHeading() ?? normalizeHeading(mapHeading)
-                let headingValue = interpolator.puckState == .moving
-                    ? interpolator.displayHeading
-                    : fallbackHeading
+                // In heading modes, pin cone to displayed map heading to avoid left/right wobble
+                // caused by camera-rotation lag vs. raw course updates.
+                let headingValue: Double = showCone
+                    ? normalizeHeading(mapHeading)
+                    : (liveResolvedHeading ?? interpolator.displayHeading)
                 let annotationKey = "puck-\(showCone ? "heading" : "follow")-\(puckRenderNonce)"
                 if showCone {
                     Annotation(annotationKey, coordinate: coordinate, anchor: .center) {

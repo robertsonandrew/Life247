@@ -28,7 +28,7 @@ enum NotificationSoundOption: String, CaseIterable, Hashable {
     }
 
     var notificationSound: UNNotificationSound {
-        .soundNamed(UNNotificationSoundName(rawValue: rawValue))
+        UNNotificationSound(named: UNNotificationSoundName(rawValue: rawValue))
     }
 }
 
