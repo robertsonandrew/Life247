@@ -158,7 +158,7 @@ struct PlaceRowView: View {
                 Text(place.name)
                     .font(.headline)
                 
-                Text("\(Int(place.radiusMeters))m radius")
+                Text("\(Int(place.clampedRadiusMeters))m radius")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -330,5 +330,6 @@ struct EditPlaceView: View {
     NavigationStack {
         PlacesView()
     }
+    .environmentObject(LocationManager())
     .modelContainer(for: Place.self, inMemory: true)
 }

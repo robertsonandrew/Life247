@@ -42,6 +42,12 @@ struct DashboardView: View {
     @State private var puckRenderNonce: Int = 0
     @AppStorage("historyTimeSpan") private var historyTimeSpanRaw: String = HistoryTimeSpan.off.rawValue
     @State private var routeCoordinates: [CLLocationCoordinate2D] = []  // Cached for stable polyline
+    @State private var routeRenderNonce: Int = 0
+    @State private var lastSyncedRouteDriveId: UUID?
+    @State private var lastSyncedRoutePointCount: Int = 0
+    @State private var lastSyncedRouteTimestamp: Date?
+    @State private var routeSyncTask: Task<Void, Never>?
+    @State private var uniqueMapPlacesCache: [Place] = []
     @State private var showMapStyleSheet = false
     @State private var interpolator = LocationInterpolator()
     @Namespace private var mapScope
@@ -126,62 +132,42 @@ struct DashboardView: View {
     }
 
     private struct PlaceCircleStyle {
-        let fillOpacity: Double
-        let haloOpacity: Double
         let strokeOpacity: Double
         let strokeWidth: CGFloat
-        let coreOpacity: Double
-        let coreStrokeOpacity: Double
-        let coreStrokeWidth: CGFloat
-        let coreScale: Double
+        let haloOpacity: Double
+        let haloWidth: CGFloat
     }
 
     private var placeCircleStyle: PlaceCircleStyle {
-        // Normalize visual density by zoom distance so geofences remain readable.
+        // Stroke-only rendering avoids SwiftUI MapCircle fill artifacts on some render passes.
         switch cameraDistance {
         case ..<1200:
             return PlaceCircleStyle(
-                fillOpacity: 0.16,
-                haloOpacity: 0.22,
-                strokeOpacity: 0.72,
-                strokeWidth: 2.6,
-                coreOpacity: 0.18,
-                coreStrokeOpacity: 0.62,
-                coreStrokeWidth: 1.6,
-                coreScale: 0.20
+                strokeOpacity: 0.82,
+                strokeWidth: 2.1,
+                haloOpacity: 0.24,
+                haloWidth: 4.2
             )
         case ..<5000:
             return PlaceCircleStyle(
-                fillOpacity: 0.14,
-                haloOpacity: 0.19,
-                strokeOpacity: 0.62,
-                strokeWidth: 2.2,
-                coreOpacity: 0.16,
-                coreStrokeOpacity: 0.54,
-                coreStrokeWidth: 1.4,
-                coreScale: 0.17
+                strokeOpacity: 0.68,
+                strokeWidth: 1.8,
+                haloOpacity: 0.18,
+                haloWidth: 3.3
             )
         case ..<18000:
             return PlaceCircleStyle(
-                fillOpacity: 0.11,
-                haloOpacity: 0.15,
-                strokeOpacity: 0.48,
-                strokeWidth: 1.8,
-                coreOpacity: 0.14,
-                coreStrokeOpacity: 0.44,
-                coreStrokeWidth: 1.2,
-                coreScale: 0.14
+                strokeOpacity: 0.52,
+                strokeWidth: 1.5,
+                haloOpacity: 0.12,
+                haloWidth: 2.4
             )
         default:
             return PlaceCircleStyle(
-                fillOpacity: 0.08,
-                haloOpacity: 0.12,
-                strokeOpacity: 0.36,
-                strokeWidth: 1.4,
-                coreOpacity: 0.12,
-                coreStrokeOpacity: 0.36,
-                coreStrokeWidth: 1.0,
-                coreScale: 0.12
+                strokeOpacity: 0.40,
+                strokeWidth: 1.1,
+                haloOpacity: 0.08,
+                haloWidth: 1.8
             )
         }
     }
@@ -226,6 +212,34 @@ struct DashboardView: View {
         default: return 1.0
         }
     }
+
+    private var shouldShowDwellBubble: Bool {
+        cameraDistance < 6000
+    }
+
+    private var dwellBubbleYOffset: CGFloat {
+        switch cameraDistance {
+        case ..<1200: return -24
+        case ..<3500: return -20
+        default: return -16
+        }
+    }
+
+    private var activeDwellDotSize: CGFloat {
+        switch cameraDistance {
+        case ..<2000: return 9
+        case ..<7000: return 8
+        default: return 6.5
+        }
+    }
+
+    private var activeDwellRingSize: CGFloat {
+        switch cameraDistance {
+        case ..<2000: return 16
+        case ..<7000: return 13
+        default: return 10
+        }
+    }
     
     // Camera updates are driven directly by stateMachine.currentLocation.
     // Puck/cone rendering uses a custom annotation to keep icon + cone in sync.
@@ -244,14 +258,148 @@ struct DashboardView: View {
         }
     }
     
-    /// The place where active dwell is happening (matches by name)
+    /// The place where active dwell is happening.
+    /// Uses name+proximity first to heal duplicate-place drift, then placeId fallback.
     private var activeDwellPlace: Place? {
+        let places = uniqueMapPlaces
         if let dwell = stateMachine.activeDwellSummary {
-            return savedPlaces.first { $0.name == dwell.placeName }
-        } else if let soft = softDwell {
-            return savedPlaces.first { $0.name == soft.placeName }
+            if let current = stateMachine.currentLocation {
+                let accuracyBuffer = min(40.0, max(10.0, current.horizontalAccuracy))
+                let containingNameMatches = places.filter {
+                    $0.name == dwell.placeName &&
+                    $0.contains(current.coordinate, additionalBufferMeters: accuracyBuffer)
+                }
+                if !containingNameMatches.isEmpty {
+                    return containingNameMatches.min { lhs, rhs in
+                        if abs(lhs.effectiveRadius - rhs.effectiveRadius) > 0.5 {
+                            return lhs.effectiveRadius < rhs.effectiveRadius
+                        }
+                        return lhs.distance(to: current.coordinate) < rhs.distance(to: current.coordinate)
+                    }
+                }
+            }
+
+            let proximityThreshold = max(25.0, min(dwell.placeRadiusMeters * 0.6, 90.0))
+            // Heal stale visits linked to older duplicate records by preferring
+            // nearby same-name places with the tightest radius.
+            let nearbyNameMatches = places.filter {
+                $0.name == dwell.placeName && $0.distance(to: dwell.placeCoordinate) <= proximityThreshold
+            }
+            if !nearbyNameMatches.isEmpty {
+                return nearbyNameMatches.min { lhs, rhs in
+                    if abs(lhs.effectiveRadius - rhs.effectiveRadius) > 0.5 {
+                        return lhs.effectiveRadius < rhs.effectiveRadius
+                    }
+                    return lhs.distance(to: dwell.placeCoordinate) < rhs.distance(to: dwell.placeCoordinate)
+                }
+            }
+
+            if let dwellPlaceId = dwell.placeId,
+               let matched = places.first(where: { $0.placeId == dwellPlaceId }) {
+                return matched
+            }
+
+            let nameMatches = places.filter { $0.name == dwell.placeName }
+            if !nameMatches.isEmpty {
+                return nameMatches.min { lhs, rhs in
+                    lhs.distance(to: dwell.placeCoordinate) < rhs.distance(to: dwell.placeCoordinate)
+                }
+            }
+            return places.min { lhs, rhs in
+                lhs.distance(to: dwell.placeCoordinate) < rhs.distance(to: dwell.placeCoordinate)
+            }
         }
+
+        if let soft = softDwell {
+            if let matched = places.first(where: { $0.placeId == soft.placeId }) {
+                return matched
+            }
+
+            let candidates = places.filter { $0.name == soft.placeName }
+            if let coordinate = stateMachine.currentLocation?.coordinate, !candidates.isEmpty {
+                return candidates.min { lhs, rhs in
+                    lhs.distance(to: coordinate) < rhs.distance(to: coordinate)
+                }
+            }
+            return candidates.first
+        }
+
         return nil
+    }
+
+    /// Places used for map rendering (deduplicated by spatial + semantic signature).
+    /// This prevents stacked duplicate circles from becoming an opaque white disk.
+    private var uniqueMapPlaces: [Place] {
+        uniqueMapPlacesCache
+    }
+
+    private func canonicalMapPlace(from cluster: [Place]) -> Place? {
+        guard !cluster.isEmpty else { return nil }
+        let count = Double(cluster.count)
+        let centroid = CLLocationCoordinate2D(
+            latitude: cluster.reduce(0.0) { $0 + $1.latitude } / count,
+            longitude: cluster.reduce(0.0) { $0 + $1.longitude } / count
+        )
+        return cluster.min { lhs, rhs in
+            if abs(lhs.effectiveRadius - rhs.effectiveRadius) > 0.5 {
+                return lhs.effectiveRadius < rhs.effectiveRadius
+            }
+            let lhsDistance = lhs.distance(to: centroid)
+            let rhsDistance = rhs.distance(to: centroid)
+            if abs(lhsDistance - rhsDistance) > 0.5 {
+                return lhsDistance < rhsDistance
+            }
+            return lhs.placeId.uuidString < rhs.placeId.uuidString
+        }
+    }
+
+    private func normalizePlaceName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var savedPlacesSignature: String {
+        let parts = savedPlaces.map { place in
+            "\(place.placeId.uuidString)|\(place.latitude)|\(place.longitude)|\(place.clampedRadiusMeters)|\(normalizePlaceName(place.name))"
+        }
+        return parts.sorted().joined(separator: ";")
+    }
+
+    private func updateUniqueMapPlacesCache() {
+        uniqueMapPlacesCache = computeUniqueMapPlaces(from: savedPlaces)
+    }
+
+    private func computeUniqueMapPlaces(from places: [Place]) -> [Place] {
+        guard !places.isEmpty else { return [] }
+        let proximityThresholdMeters: CLLocationDistance = 35
+        let grouped = Dictionary(grouping: places) { normalizePlaceName($0.name) }
+        var deduped: [Place] = []
+
+        for (_, sameNamePlaces) in grouped {
+            var clusters: [[Place]] = []
+
+            for place in sameNamePlaces {
+                if let clusterIndex = clusters.firstIndex(where: { cluster in
+                    cluster.contains { candidate in
+                        candidate.distance(to: place.coordinate) <= proximityThresholdMeters
+                    }
+                }) {
+                    clusters[clusterIndex].append(place)
+                } else {
+                    clusters.append([place])
+                }
+            }
+
+            for cluster in clusters {
+                guard let canonical = canonicalMapPlace(from: cluster) else { continue }
+                deduped.append(canonical)
+            }
+        }
+
+        return deduped.sorted {
+            if $0.name != $1.name { return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            if $0.latitude != $1.latitude { return $0.latitude < $1.latitude }
+            return $0.longitude < $1.longitude
+        }
     }
     
     var body: some View {
@@ -328,6 +476,7 @@ struct DashboardView: View {
                     cancelHistoryCacheTask()
                     cancelRouteFocusTask()
                     historyTapCycleState = nil
+                    stopRouteSyncTask()
                 }
             }
     }
@@ -352,16 +501,29 @@ struct DashboardView: View {
                     if let location = stateMachine.currentLocation {
                         interpolator.receive(location)
                     }
+                    syncActiveRoutePoints(force: true)
                     updateHistoryCache()
+                    startRouteSyncTaskIfNeeded()
                 } else {
                     interpolator.stop()
+                    stopRouteSyncTask()
                 }
             }
             // Use .task for route initialization - runs before first render, guaranteed
             .task { if isVisible { initializeRouteCacheFromActiveDrive() } }
             .onChange(of: stateMachine.currentLocation) { _, newLocation in
                 guard isVisible else { return }
+                syncActiveRoutePoints()
                 handleLocationChange(newLocation)
+            }
+            .onChange(of: savedPlacesSignature) { _, _ in
+                updateUniqueMapPlacesCache()
+            }
+            .onChange(of: stateMachine.routePointVersion) { _, _ in
+                syncActiveRoutePoints(force: true)
+            }
+            .onChange(of: stateMachine.activeDrive?.id) { _, _ in
+                syncActiveRoutePoints(force: true)
             }
             .onChange(of: stateMachine.state) { oldState, newState in
                 // Keep tracking-mode transitions in sync even when map tab is hidden.
@@ -379,10 +541,6 @@ struct DashboardView: View {
             .onChange(of: locationManager.currentHeading) { _, newHeading in
                 guard isVisible else { return }
                 handleHeadingChange(newHeading)
-            }
-            .onChange(of: stateMachine.activeDrive?.points.count) { _, _ in
-                guard isVisible else { return }
-                syncActiveRoutePoints()
             }
             .onChange(of: defaultZoomLevelRaw) { _, _ in
                 guard isVisible else { return }
@@ -481,11 +639,11 @@ struct DashboardView: View {
     @MapContentBuilder
     private var placesContent: some MapContent {
         if shouldShowPlaces {
-            ForEach(savedPlaces) { place in
+            ForEach(uniqueMapPlaces) { place in
                 placeCircle(for: place)
             }
             if showPlaceCenterMarkers {
-                ForEach(savedPlaces) { place in
+                ForEach(uniqueMapPlaces) { place in
                     if place.id != activeDwellPlace?.id {
                         placeCenterMarker(for: place)
                     }
@@ -502,21 +660,46 @@ struct DashboardView: View {
     private func placeCircle(for place: Place) -> some MapContent {
         let style = placeCircleStyle
         let color = placeColor(for: place.icon)
-        let coreRadius = max(10, min(place.radiusMeters * style.coreScale, 65))
-        
-        MapCircle(center: place.coordinate, radius: place.radiusMeters)
-            .foregroundStyle(color.opacity(style.fillOpacity))
-            .stroke(.white.opacity(style.haloOpacity), lineWidth: style.strokeWidth + 1.2)
+        let displayRadius = place.clampedRadiusMeters
+        let isActivePlace = activeDwellPlace?.id == place.id
+        let activeRingRadius = displayRadius + max(8, min(displayRadius * 0.05, 20))
+        let ringCoordinates = geofenceRingCoordinates(center: place.coordinate, radiusMeters: displayRadius)
+        let activeRingCoordinates = geofenceRingCoordinates(center: place.coordinate, radiusMeters: activeRingRadius)
+
+        MapPolyline(coordinates: ringCoordinates)
+            .stroke(color.opacity(style.haloOpacity), lineWidth: style.haloWidth)
+        MapPolyline(coordinates: ringCoordinates)
             .stroke(color.opacity(style.strokeOpacity), lineWidth: style.strokeWidth)
         
-        MapCircle(center: place.coordinate, radius: coreRadius)
-            .foregroundStyle(color.opacity(style.coreOpacity))
-            .stroke(color.opacity(style.coreStrokeOpacity), lineWidth: style.coreStrokeWidth)
-        
-        if activeDwellPlace?.id == place.id {
-            MapCircle(center: place.coordinate, radius: place.radiusMeters + 16)
-                .stroke(.white.opacity(0.32), lineWidth: 1.5)
+        if isActivePlace {
+            MapPolyline(coordinates: activeRingCoordinates)
+                .stroke(color.opacity(0.50), lineWidth: 1.2)
         }
+    }
+
+    /// Build a closed circle ring as coordinates and render via MapPolyline.
+    /// This avoids MapCircle fill artifacts seen on some SwiftUI Map render passes.
+    private func geofenceRingCoordinates(
+        center: CLLocationCoordinate2D,
+        radiusMeters: CLLocationDistance,
+        segments: Int = 96
+    ) -> [CLLocationCoordinate2D] {
+        let clampedSegments = max(24, min(192, segments))
+        let centerPoint = MKMapPoint(center)
+        let pointsPerMeter = MKMapPointsPerMeterAtLatitude(center.latitude)
+        let mapRadius = radiusMeters * pointsPerMeter
+
+        var coordinates: [CLLocationCoordinate2D] = []
+        coordinates.reserveCapacity(clampedSegments + 1)
+
+        for index in 0...clampedSegments {
+            let theta = (Double(index) / Double(clampedSegments)) * 2.0 * .pi
+            let x = centerPoint.x + (mapRadius * cos(theta))
+            let y = centerPoint.y + (mapRadius * sin(theta))
+            coordinates.append(MKMapPoint(x: x, y: y).coordinate)
+        }
+
+        return coordinates
     }
 
     private func placeCenterMarker(for place: Place) -> some MapContent {
@@ -625,9 +808,11 @@ struct DashboardView: View {
     /// Active drive route layer
     @MapContentBuilder
     private var routeContent: some MapContent {
-        if !routeCoordinates.isEmpty {
-            MapPolyline(coordinates: routeCoordinates)
-                .stroke(.blue, lineWidth: 6)
+        if routeCoordinates.count > 1 {
+            ForEach([routeRenderNonce], id: \.self) { _ in
+                MapPolyline(coordinates: routeCoordinates)
+                    .stroke(.blue, lineWidth: 6)
+            }
         }
     }
     
@@ -639,19 +824,21 @@ struct DashboardView: View {
             } label: {
                 Circle()
                     .fill(.white.opacity(0.95))
-                    .frame(width: 9, height: 9)
+                    .frame(width: activeDwellDotSize, height: activeDwellDotSize)
                     .overlay(
                         Circle()
                             .stroke(.white.opacity(0.5), lineWidth: 1)
-                            .frame(width: 16, height: 16)
+                            .frame(width: activeDwellRingSize, height: activeDwellRingSize)
                     )
             }
             .buttonStyle(.plain)
             .overlay(alignment: .top) {
-                dwellBubble
-                    .fixedSize()  // Prevent clipping to parent size
-                    .offset(y: -24)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                if shouldShowDwellBubble {
+                    dwellBubble
+                        .fixedSize()  // Prevent clipping to parent size
+                        .offset(y: dwellBubbleYOffset)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
             }
         }
         .annotationTitles(.hidden)
@@ -772,6 +959,9 @@ struct DashboardView: View {
 
     private func handleOnAppear() {
         guard isVisible else { return }
+        updateUniqueMapPlacesCache()
+        syncActiveRoutePoints(force: true)
+        startRouteSyncTaskIfNeeded()
         if let location = stateMachine.currentLocation {
             interpolator.receive(location)
         }
@@ -793,9 +983,7 @@ struct DashboardView: View {
     }
 
     private func initializeRouteCacheFromActiveDrive() {
-        if let drive = stateMachine.activeDrive {
-            routeCoordinates = drive.pointsChronological.map { $0.coordinate }
-        }
+        syncActiveRoutePoints(force: true)
     }
 
     private func handleLocationChange(_ newLocation: CLLocation?) {
@@ -832,18 +1020,120 @@ struct DashboardView: View {
         updateCameraForHeadingChange(location: location, heading: heading)
     }
 
-    private func syncActiveRoutePoints() {
-        // Update cached route only when points change
+    private func syncActiveRoutePoints(force: Bool = false) {
         guard let drive = stateMachine.activeDrive else {
-            routeCoordinates = []
+            if !routeCoordinates.isEmpty || lastSyncedRouteDriveId != nil {
+                applyRouteCoordinates([])
+                lastSyncedRouteDriveId = nil
+                lastSyncedRoutePointCount = 0
+                lastSyncedRouteTimestamp = nil
+            }
             return
         }
-        routeCoordinates = drive.pointsChronological.map { $0.coordinate }
+
+        let liveCoordinates = stateMachine.activeRouteCoordinates
+        if !liveCoordinates.isEmpty {
+            let driveChanged = lastSyncedRouteDriveId != drive.id
+            if driveChanged {
+                applyRouteCoordinates(liveCoordinates)
+            } else if liveCoordinates.count >= routeCoordinates.count {
+                applyRouteCoordinates(liveCoordinates)
+            }
+
+            lastSyncedRouteDriveId = drive.id
+            lastSyncedRoutePointCount = max(lastSyncedRoutePointCount, routeCoordinates.count)
+            lastSyncedRouteTimestamp = drive.latestPointTimestamp ?? lastSyncedRouteTimestamp
+            return
+        }
+
+        let pointCount = drive.points.count
+        let latestTimestamp = drive.latestPointTimestamp
+        let driveChanged = lastSyncedRouteDriveId != drive.id
+        let countChanged = lastSyncedRoutePointCount != pointCount
+        let tailChanged = lastSyncedRouteTimestamp != latestTimestamp
+
+        guard force || driveChanged || countChanged || tailChanged else { return }
+
+        let freshCoordinates = drive.pointsChronological.map { $0.coordinate }
+
+        if driveChanged {
+            applyRouteCoordinates(freshCoordinates)
+        } else {
+            // SwiftData relationship snapshots can occasionally regress temporarily.
+            // Never shrink an active route from a smaller refresh; wait for a larger/fresher sample.
+            if freshCoordinates.count < routeCoordinates.count {
+                lastSyncedRouteDriveId = drive.id
+                lastSyncedRoutePointCount = max(lastSyncedRoutePointCount, routeCoordinates.count)
+                if let latestTimestamp {
+                    if let last = lastSyncedRouteTimestamp {
+                        lastSyncedRouteTimestamp = max(last, latestTimestamp)
+                    } else {
+                        lastSyncedRouteTimestamp = latestTimestamp
+                    }
+                }
+                return
+            }
+            applyRouteCoordinates(freshCoordinates)
+        }
+
+        lastSyncedRouteDriveId = drive.id
+        lastSyncedRoutePointCount = max(pointCount, routeCoordinates.count)
+        lastSyncedRouteTimestamp = latestTimestamp
+    }
+
+    private func applyRouteCoordinates(_ newCoordinates: [CLLocationCoordinate2D]) {
+        guard shouldReplaceRouteCoordinates(with: newCoordinates) else { return }
+        routeCoordinates = newCoordinates
+        routeRenderNonce &+= 1
+    }
+
+    private func shouldReplaceRouteCoordinates(with newCoordinates: [CLLocationCoordinate2D]) -> Bool {
+        if newCoordinates.count != routeCoordinates.count {
+            return true
+        }
+        guard let oldFirst = routeCoordinates.first,
+              let oldLast = routeCoordinates.last,
+              let newFirst = newCoordinates.first,
+              let newLast = newCoordinates.last else {
+            return routeCoordinates.isEmpty != newCoordinates.isEmpty
+        }
+
+        let firstChanged = abs(oldFirst.latitude - newFirst.latitude) > 0.0000001 ||
+            abs(oldFirst.longitude - newFirst.longitude) > 0.0000001
+        let lastChanged = abs(oldLast.latitude - newLast.latitude) > 0.0000001 ||
+            abs(oldLast.longitude - newLast.longitude) > 0.0000001
+        return firstChanged || lastChanged
+    }
+
+    private func startRouteSyncTaskIfNeeded() {
+        guard routeSyncTask == nil else { return }
+        guard isVisible else { return }
+        guard stateMachine.state == .driving ||
+                stateMachine.state == .maybeDriving ||
+                stateMachine.state == .stopped ||
+                stateMachine.state == .pendingArrival else { return }
+
+        routeSyncTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                await MainActor.run {
+                    syncActiveRoutePoints(force: true)
+                }
+            }
+        }
+    }
+
+    private func stopRouteSyncTask() {
+        routeSyncTask?.cancel()
+        routeSyncTask = nil
     }
 
     private func handleDriveStateChange(from _: DriveState, to newState: DriveState) {
         if newState == .driving || newState == .maybeDriving || newState == .stopped || newState == .pendingArrival {
             selectedHistoryRoute = nil
+            startRouteSyncTaskIfNeeded()
+        } else {
+            stopRouteSyncTask()
         }
 
         if newState == .driving || newState == .maybeDriving {
@@ -937,14 +1227,14 @@ struct DashboardView: View {
 
         // Fast exit conditions if we already have a soft dwell.
         if let soft = softDwell {
-            guard let place = placeForSoftDwellKey(soft.key) else {
+            guard let place = placeForSoftDwell(soft) else {
                 softDwell = nil
                 softDwellCandidate = nil
                 return
             }
 
             let distance = place.distance(to: location.coordinate)
-            let radius = place.radiusMeters
+            let radius = place.effectiveRadius
             let stillInside = distance <= (radius + exitBufferMeters)
             let accuracyOK = accuracyValid && accuracy <= exitAccuracyMeters
             let speedOK = !speedKnown || speedMPH <= exitSpeedMPH
@@ -969,7 +1259,7 @@ struct DashboardView: View {
             return
         }
 
-        let radius = place.radiusMeters
+        let radius = place.effectiveRadius
         let entryThreshold = max(0, radius - entryBufferMeters)
         guard distance <= entryThreshold else {
             softDwellCandidate = nil
@@ -980,6 +1270,7 @@ struct DashboardView: View {
         if softDwellCandidate?.key != key {
             softDwellCandidate = SoftDwellCandidate(
                 key: key,
+                placeId: place.placeId,
                 placeName: place.name,
                 placeIcon: place.icon,
                 firstSeenAt: now,
@@ -994,6 +1285,7 @@ struct DashboardView: View {
         if let candidate = softDwellCandidate, now.timeIntervalSince(candidate.firstSeenAt) >= confirmSeconds {
             softDwell = SoftDwell(
                 key: candidate.key,
+                placeId: candidate.placeId,
                 placeName: candidate.placeName,
                 placeIcon: candidate.placeIcon,
                 startedAt: candidate.firstSeenAt
@@ -1007,7 +1299,14 @@ struct DashboardView: View {
         places: [Place]
     ) -> (Place, CLLocationDistance)? {
         let containing = places.filter { $0.contains(coordinate) }
-        guard let best = containing.min(by: { $0.distance(to: coordinate) < $1.distance(to: coordinate) }) else {
+        guard let best = containing.min(by: { lhs, rhs in
+            let lhsRadius = lhs.effectiveRadius
+            let rhsRadius = rhs.effectiveRadius
+            if abs(lhsRadius - rhsRadius) > 0.5 {
+                return lhsRadius < rhsRadius
+            }
+            return lhs.distance(to: coordinate) < rhs.distance(to: coordinate)
+        }) else {
             return nil
         }
         return (best, best.distance(to: coordinate))
@@ -1017,8 +1316,15 @@ struct DashboardView: View {
         savedPlaces.first { softDwellKey(for: $0) == key }
     }
 
+    private func placeForSoftDwell(_ soft: SoftDwell) -> Place? {
+        if let byId = savedPlaces.first(where: { $0.placeId == soft.placeId }) {
+            return byId
+        }
+        return placeForSoftDwellKey(soft.key)
+    }
+
     private func softDwellKey(for place: Place) -> String {
-        "\(place.name)|\(place.latitude)|\(place.longitude)|\(place.radiusMeters)"
+        "\(place.name)|\(place.latitude)|\(place.longitude)|\(place.clampedRadiusMeters)"
     }
     
     // MARK: - Camera Updates
@@ -1987,6 +2293,7 @@ private struct PuckWithHeadingOverlay: View {
 
 private struct SoftDwell {
     let key: String
+    let placeId: UUID
     let placeName: String
     let placeIcon: String
     let startedAt: Date
@@ -1994,6 +2301,7 @@ private struct SoftDwell {
 
 private struct SoftDwellCandidate {
     let key: String
+    let placeId: UUID
     let placeName: String
     let placeIcon: String
     let firstSeenAt: Date

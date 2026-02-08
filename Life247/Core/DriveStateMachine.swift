@@ -40,6 +40,10 @@ final class DriveStateMachine {
     private let idleSpeedConfirmSeconds: TimeInterval = 2.0
     /// Ignore location samples older than this for start decisions (seconds).
     private let idleStartLocationMaxAgeSeconds: TimeInterval = 12.0
+    /// Pending start reason is metadata only; expire it if idle too long.
+    private let pendingStartReasonMaxIdleAgeSeconds: TimeInterval = 120.0
+    /// Looser staleness bound after geofence-exit wake-up to absorb background wake lag.
+    private let geofenceExitStartLocationMaxAgeSeconds: TimeInterval = 20.0
     
     /// Speed threshold to detect stopped (mph)
     private let stoppedSpeedThreshold: Double = 1.0
@@ -53,9 +57,6 @@ final class DriveStateMachine {
 
     /// Sustained speed required before resuming from stopped (seconds).
     private let stoppedResumeSustainDuration: TimeInterval = 6.0
-
-    /// Speed threshold to treat geofence entry as immediate arrival (mph)
-    private let geofenceImmediateEndSpeedMPH: Double = 15.0
 
     /// Low-speed threshold to qualify a stop candidate (mph)
     private let lowSpeedCandidateThreshold: Double = 3.0
@@ -74,6 +75,20 @@ final class DriveStateMachine {
 
     /// Early auto-end delay when on-foot is recent (seconds)
     private let onFootEarlyEndDelay: TimeInterval = 90.0
+
+    /// Apply stricter stopped→driving resume checks shortly after large GPS gaps.
+    /// This prevents single-sample speed spikes from resurrecting a parked drive.
+    private let largeGPSGapSecondsForResumeGuard: TimeInterval = 75.0
+    private let resumeGuardWindowAfterGap: TimeInterval = 45.0
+    private let resumeGuardMinCoverageSeconds: TimeInterval = 15.0
+    private let resumeGuardMinDistanceMeters: Double = 70.0
+    private let resumeGuardMinSpeedMPH: Double = 18.0
+    private let resumeGuardSustainDuration: TimeInterval = 10.0
+
+    /// Short geofence-exit grace window to bias idle detection toward departure.
+    private let geofenceExitWakeWindowSeconds: TimeInterval = 45.0
+    private let geofenceExitWakeConfirmSeconds: TimeInterval = 1.0
+    private let geofenceExitWakeSpeedThresholdMPH: Double = 3.0
     
     /// Maximum drive duration before safety end (hours)
     private let safetyMaxDriveHours: Double = 8.0
@@ -109,6 +124,8 @@ final class DriveStateMachine {
 
     /// Max age for a location used to confirm arrival (seconds)
     private let pendingArrivalMaxLocationAgeSeconds: TimeInterval = 120.0
+    /// Pending-arrival validation timeout window (seconds).
+    private let pendingArrivalValidationTimeout: TimeInterval = 30.0
     
     /// Maximum time in maybeDriving before giving up (seconds) - clamped
     private var verificationTimeout: TimeInterval {
@@ -125,6 +142,12 @@ final class DriveStateMachine {
     
     /// Latest location for UI display
     private(set) var currentLocation: CLLocation?
+
+    /// Version counter for active route points (drives view sync).
+    private(set) var routePointVersion: Int = 0
+    /// Live in-memory route coordinates for the active drive.
+    /// This avoids transient SwiftData relationship lag in map rendering.
+    private(set) var activeRouteCoordinates: [CLLocationCoordinate2D] = []
     
     /// Whether we're in post-drive monitoring grace period (high-accuracy still active).
     /// This helps recover if a drive ended due to a false arrival.
@@ -170,6 +193,7 @@ final class DriveStateMachine {
     private var stoppedTimer: Task<Void, Never>?
     private var safetyTimer: Task<Void, Never>?
     private var pendingArrivalTimer: Task<Void, Never>?
+    private var pendingArrivalEnteredAt: Date?
     private var postDriveMonitoringDeadline: Date?
     
     /// Grace period after drive ends to keep high-accuracy mode active (seconds).
@@ -186,6 +210,7 @@ final class DriveStateMachine {
     
     // Track the reason for the upcoming drive start
     private var pendingStartReason: DriveStartReason?
+    private var pendingStartReasonSetAt: Date?
     
     // Track the reason for the upcoming drive end (defaults to inactivityTimeout if not set)
     private var pendingEndReason: DriveEndReason?
@@ -212,6 +237,14 @@ final class DriveStateMachine {
 
     // Recent locations buffer for distance-based stop detection
     private var recentLocations: [CLLocation] = []
+
+    // Recent large GPS gap tracking (used by stopped->driving resume guard)
+    private var lastLargeGPSGapAt: Date?
+    private var lastLargeGPSGapSeconds: TimeInterval = 0
+
+    // Geofence-exit wake tracking (improves start reliability during background wakes)
+    private var geofenceExitWakeUntil: Date?
+    private var geofenceExitWakeRegionId: String?
     
     // Track which geofence regions we're currently inside (for arrival detection)
     private var insideRegionIds: Set<String> = []
@@ -293,6 +326,47 @@ final class DriveStateMachine {
         lastOneShotRequest = now
         logger.info("[ONE-SHOT] Requesting GPS for: \(reason)")
         locationManager?.requestOneShotLocation(reason: reason)
+    }
+
+    private func setPendingStartReason(_ reason: DriveStartReason, at timestamp: Date = Date()) {
+        pendingStartReason = reason
+        pendingStartReasonSetAt = timestamp
+    }
+
+    private func clearPendingStartReason() {
+        pendingStartReason = nil
+        pendingStartReasonSetAt = nil
+    }
+
+    private func pruneStalePendingStartReasonIfIdle(at now: Date = Date()) {
+        guard state == .idle else { return }
+        guard let reason = pendingStartReason, let setAt = pendingStartReasonSetAt else { return }
+        if reason == .geofenceExit && !isGeofenceExitWakeActive(at: now) {
+            logger.debug("[START-REASON] Clearing geofence-exit reason outside wake window")
+            clearPendingStartReason()
+            return
+        }
+        let age = now.timeIntervalSince(setAt)
+        guard age > pendingStartReasonMaxIdleAgeSeconds else { return }
+        logger.debug("[START-REASON] Clearing stale pending reason \(reason.rawValue) (age=\(Int(age))s)")
+        clearPendingStartReason()
+    }
+
+    private func armGeofenceExitWake(regionId: String) {
+        geofenceExitWakeUntil = Date().addingTimeInterval(geofenceExitWakeWindowSeconds)
+        geofenceExitWakeRegionId = regionId
+    }
+
+    private func clearGeofenceExitWake() {
+        geofenceExitWakeUntil = nil
+        geofenceExitWakeRegionId = nil
+    }
+
+    private func isGeofenceExitWakeActive(at now: Date = Date()) -> Bool {
+        guard let geofenceExitWakeUntil else { return false }
+        if now <= geofenceExitWakeUntil { return true }
+        clearGeofenceExitWake()
+        return false
     }
     
     // MARK: - State Reconciliation
@@ -381,6 +455,7 @@ final class DriveStateMachine {
         } else if state == "active" {
             // Reconcile grace deadlines after returning from suspension.
             updatePostDriveMonitoringIfNeeded()
+            reconcilePendingArrivalAfterWake()
         }
     }
     
@@ -485,7 +560,7 @@ final class DriveStateMachine {
         if speedValid && rawSpeed >= coldStartSpeedThreshold {
             // Motion + fresh high speed → go directly to driving
             logger.info("[RECOVERY] Motion=YES, Fresh speed=\(String(format: "%.1f", speedMPH))mph → entering DRIVING")
-            pendingStartReason = .coldStartRecovery
+            setPendingStartReason(.coldStartRecovery)
             transitionDirectToDriving(trigger: "cold_start_high_speed")
         } else {
             // Motion suggests driving but speed is stale/low/unknown → stay IDLE and corroborate via one-shot GPS
@@ -504,6 +579,8 @@ final class DriveStateMachine {
         }
         
         activeDrive = drive
+        activeRouteCoordinates = drive.pointsChronological.map { $0.coordinate }
+        routePointVersion &+= 1
         state = .driving
         pendingRecoveryDrive = nil
         
@@ -666,6 +743,7 @@ final class DriveStateMachine {
         @unknown default: confidenceStr = "unknown"
         }
         driveLogger.log(.motion, type: "motion_automotive", message: "Automotive motion detected (\(confidenceStr))")
+        pruneStalePendingStartReasonIfIdle()
         
         switch state {
         case .idle:
@@ -673,7 +751,7 @@ final class DriveStateMachine {
             // Instead, set flag to lower speed threshold in handleLocationUpdate
             if confidence == .high || confidence == .medium {
                 hasRecentAutomotiveMotion = true
-                pendingStartReason = .motionActivity
+                setPendingStartReason(.motionActivity)
                 logger.debug("[MOTION] Automotive detected - awaiting GPS corroboration")
                 
                 // Request one-shot GPS to bootstrap detection
@@ -683,7 +761,7 @@ final class DriveStateMachine {
         case .maybeDriving:
             // Update confidence tracking; fast-track check happens in handleLocationUpdate
             if confidence == .high {
-                pendingStartReason = .motionActivity
+                setPendingStartReason(.motionActivity)
             }
             
         case .driving, .stopped:
@@ -718,8 +796,31 @@ final class DriveStateMachine {
         case .maybeDriving:
             // Non-automotive motion negates maybeDriving
             transition(to: .idle, trigger: "motion_not_automotive")
+
+        case .driving:
+            // Conservative fast-path: if motion says non-automotive and GPS already
+            // indicates very low movement, treat this as a strong stop signal.
+            let speedMPH = currentLocation.map { max(0, speedInMPH(for: $0)) } ?? 0
+            let summary = recentDistanceSummary()
+            let lowMovement = summary.samples >= 2
+                && summary.coverage >= 30
+                && summary.distance <= 20
+            if speedMPH <= 2.5 && lowMovement {
+                logger.info("[ON-FOOT] Non-automotive + very low movement while driving - entering stopped")
+                driveLogger.log(
+                    .decision,
+                    type: "motion_not_auto_stop_candidate",
+                    message: "Non-automotive + low movement → stopped",
+                    metadata: [
+                        "speedMPH": String(format: "%.1f", speedMPH),
+                        "distanceMeters": String(format: "%.1f", summary.distance),
+                        "coverageSeconds": String(format: "%.0f", summary.coverage)
+                    ]
+                )
+                transition(to: .stopped, trigger: "motion_not_auto_low_movement")
+            }
             
-        case .idle, .driving, .stopped, .ended, .pendingArrival:
+        case .idle, .stopped, .ended, .pendingArrival:
             // Ignore - GPS is the authority during active driving
             break
         }
@@ -787,30 +888,46 @@ final class DriveStateMachine {
         
         switch state {
         case .idle:
+            let now = Date()
+            pruneStalePendingStartReasonIfIdle(at: now)
             // Dwell: if we're idling and inside a saved Place, ensure an active visit exists.
             placeVisitManager.updateDwellIfNeeded(currentLocation: location)
 
+            let geofenceWakeActive = isGeofenceExitWakeActive(at: now)
+            let staleAgeThreshold = geofenceWakeActive
+                ? geofenceExitStartLocationMaxAgeSeconds
+                : idleStartLocationMaxAgeSeconds
+
             // Speed can trigger maybeDriving, but guard against a single bogus/stale speed sample
             // that often appears immediately after app launch/resume.
-            let ageSeconds = Date().timeIntervalSince(location.timestamp)
-            if ageSeconds > idleStartLocationMaxAgeSeconds {
+            let ageSeconds = now.timeIntervalSince(location.timestamp)
+            if ageSeconds > staleAgeThreshold {
                 idleHighSpeedStart = nil
                 logger.debug("[IDLE] Ignoring stale location for start decision (age=\(Int(ageSeconds))s)")
                 break
             }
 
-            if speedMPH >= maybeDrivingSpeedThreshold {
+            let loweredThresholdAllowed = geofenceWakeActive && hasRecentAutomotiveMotion
+            let startSpeedThreshold = loweredThresholdAllowed
+                ? min(maybeDrivingSpeedThreshold, geofenceExitWakeSpeedThresholdMPH)
+                : maybeDrivingSpeedThreshold
+            let confirmDuration = geofenceWakeActive
+                ? min(idleSpeedConfirmSeconds, geofenceExitWakeConfirmSeconds)
+                : idleSpeedConfirmSeconds
+
+            if speedMPH >= startSpeedThreshold {
                 if idleHighSpeedStart == nil {
                     idleHighSpeedStart = location.timestamp
                     logger.debug("[IDLE] Speed ≥ threshold; starting confirm window")
                 } else if let start = idleHighSpeedStart,
-                          location.timestamp.timeIntervalSince(start) >= idleSpeedConfirmSeconds {
+                          location.timestamp.timeIntervalSince(start) >= confirmDuration {
                     idleHighSpeedStart = nil
                     // Only set reason if not already set by motion event
                     if pendingStartReason == nil {
-                        pendingStartReason = .gpsSpeed
+                        setPendingStartReason(.gpsSpeed, at: location.timestamp)
                     }
-                    transition(to: .maybeDriving, trigger: "gps_speed_confirmed")
+                    let trigger = geofenceWakeActive ? "gps_speed_confirmed_geofence_exit" : "gps_speed_confirmed"
+                    transition(to: .maybeDriving, trigger: trigger)
                 }
             } else {
                 idleHighSpeedStart = nil
@@ -853,18 +970,20 @@ final class DriveStateMachine {
             trackGPSGapIfNeeded(from: activeDrive?.latestPointTimestamp, to: location.timestamp)
             
             // Record location point with rejection logging
-            if let drive = activeDrive {
-                let (added, reason, note) = drive.addPointWithReason(location)
-                if added {
-                    drive.locationSampleCount += 1
-                    if let note {
-                        logPointAcceptanceNote(note)
+                if let drive = activeDrive {
+                    let (added, reason, note) = drive.addPointWithReason(location)
+                    if added {
+                        drive.locationSampleCount += 1
+                        appendActiveRouteCoordinate(location.coordinate)
+                        if let note {
+                            logPointAcceptanceNote(note)
+                        }
+                        routePointVersion &+= 1
+                        periodicallySaveIfNeeded()
+                    } else if let reason {
+                        drive.droppedSampleCount += 1
+                        driveLogger.log(.location, type: "point_rejected", message: "\(reason.rawValue) acc=\(Int(location.horizontalAccuracy))m spd=\(String(format: "%.1f", location.speed))m/s")
                     }
-                    periodicallySaveIfNeeded()
-                } else if let reason {
-                    drive.droppedSampleCount += 1
-                    driveLogger.log(.location, type: "point_rejected", message: "\(reason.rawValue) acc=\(Int(location.horizontalAccuracy))m spd=\(String(format: "%.1f", location.speed))m/s")
-                }
             }
             
             // Check for low speed (potential stop)
@@ -929,7 +1048,7 @@ final class DriveStateMachine {
                 }
                 
                 // Fallback check: Are we inside a saved place? (covers cases where geofence didn't fire)
-                if let place = placeVisitManager.bestMatchingPlace(for: location.coordinate) {
+                if let place = placeVisitManager.bestMatchingPlace(for: location) {
                     logger.info("Speed dropped to \(String(format: "%.1f", speedMPH))mph at place '\(place.name)' - starting arrival validation")
                     var meta = stateSnapshotMetadata()
                     meta["reason"] = "place_slowdown"
@@ -950,9 +1069,11 @@ final class DriveStateMachine {
                 let (added, reason, note) = drive.addPointWithReason(location)
                 if added {
                     drive.locationSampleCount += 1
+                    appendActiveRouteCoordinate(location.coordinate)
                     if let note {
                         logPointAcceptanceNote(note)
                     }
+                    routePointVersion &+= 1
                     periodicallySaveIfNeeded()
                 } else if let reason {
                     drive.droppedSampleCount += 1
@@ -963,7 +1084,7 @@ final class DriveStateMachine {
             // Fast-track end: If stopped at a saved place, end drive immediately
             // This avoids waiting for the full stoppedTimeout when user clearly arrived
             if speedMPH < stoppedSpeedThreshold,
-               let place = placeVisitManager.bestMatchingPlace(for: location.coordinate) {
+               let place = placeVisitManager.bestMatchingPlace(for: location) {
                 logger.info("[PLACE-ARRIVAL] Stopped at saved place '\(place.name)' - ending drive immediately")
                 driveLogger.log(.decision, type: "place_arrival_end", message: "Arrived at \(place.name)")
                 
@@ -984,7 +1105,7 @@ final class DriveStateMachine {
             if let stoppedTime = stoppedSince,
                Date().timeIntervalSince(stoppedTime) > 30.0,
                speedMPH < resumeSpeedThreshold,  // More lenient: < 5 mph instead of < 1 mph
-               let place = placeVisitManager.bestMatchingPlace(for: location.coordinate) {
+               let place = placeVisitManager.bestMatchingPlace(for: location) {
                 logger.info("[PLACE-ARRIVAL-LENIENT] Stopped >\(Int(Date().timeIntervalSince(stoppedTime)))s at saved place '\(place.name)' - ending drive")
                 driveLogger.log(.decision, type: "place_arrival_lenient", message: "Arrived at \(place.name) after \(Int(Date().timeIntervalSince(stoppedTime)))s")
                 
@@ -1004,11 +1125,22 @@ final class DriveStateMachine {
             let requiredResumeSpeed = onFootRecent
                 ? max(resumeSpeedThreshold, resumeSpeedThresholdOnFootRecent)
                 : resumeSpeedThreshold
+            let distanceSummary = recentDistanceSummary()
+            let hasRecentLargeGap = isRecentLargeGPSGap(now)
+            let applyResumeGuard = onFootRecent && hasRecentLargeGap
+            let resumeSpeedThresholdValue = applyResumeGuard
+                ? max(requiredResumeSpeed, resumeGuardMinSpeedMPH)
+                : requiredResumeSpeed
+            let resumeSustainDuration = applyResumeGuard
+                ? max(stoppedResumeSustainDuration, resumeGuardSustainDuration)
+                : stoppedResumeSustainDuration
+            let hasResumeCoverage = !applyResumeGuard || distanceSummary.coverage >= resumeGuardMinCoverageSeconds
+            let hasResumeDistance = !applyResumeGuard || distanceSummary.distance >= resumeGuardMinDistanceMeters
 
-            if speedMPH >= requiredResumeSpeed {
+            if speedMPH >= resumeSpeedThresholdValue && hasResumeCoverage && hasResumeDistance {
                 if stoppedResumeCandidateStart == nil {
                     stoppedResumeCandidateStart = now
-                } else if now.timeIntervalSince(stoppedResumeCandidateStart!) >= stoppedResumeSustainDuration {
+                } else if now.timeIntervalSince(stoppedResumeCandidateStart!) >= resumeSustainDuration {
                     transition(
                         to: .driving,
                         trigger: onFootRecent ? "resume_speed_sustained_on_foot" : "resume_speed_sustained"
@@ -1016,6 +1148,23 @@ final class DriveStateMachine {
                     return
                 }
             } else {
+                if applyResumeGuard,
+                   speedMPH >= requiredResumeSpeed,
+                   (!hasResumeCoverage || !hasResumeDistance) {
+                    driveLogger.log(
+                        .decision,
+                        type: "resume_guard_blocked",
+                        message: "Blocked stopped->driving resume after large GPS gap",
+                        metadata: [
+                            "speedMPH": String(format: "%.1f", speedMPH),
+                            "requiredSpeedMPH": String(format: "%.1f", resumeSpeedThresholdValue),
+                            "distanceMeters": String(format: "%.1f", distanceSummary.distance),
+                            "coverageSeconds": String(format: "%.0f", distanceSummary.coverage),
+                            "gapSeconds": String(format: "%.0f", lastLargeGPSGapSeconds),
+                            "guardWindowSeconds": String(format: "%.0f", resumeGuardWindowAfterGap)
+                        ]
+                    )
+                }
                 stoppedResumeCandidateStart = nil
             }
             
@@ -1055,6 +1204,10 @@ final class DriveStateMachine {
         
         // Log gaps longer than 60 seconds (shorter gaps are normal iOS background behavior)
         if gap > 60 {
+            if gap >= largeGPSGapSecondsForResumeGuard {
+                lastLargeGPSGapAt = currentTimestamp
+                lastLargeGPSGapSeconds = gap
+            }
             driveLogger.log(
                 .anomaly,
                 type: "gps_gap",
@@ -1071,6 +1224,12 @@ final class DriveStateMachine {
                 drive.maxGapBetweenSamples = gap
             }
         }
+    }
+
+    private func isRecentLargeGPSGap(_ now: Date) -> Bool {
+        guard let lastLargeGPSGapAt else { return false }
+        guard lastLargeGPSGapSeconds >= largeGPSGapSecondsForResumeGuard else { return false }
+        return now.timeIntervalSince(lastLargeGPSGapAt) <= resumeGuardWindowAfterGap
     }
 
     /// Log non-fatal handling notes for accepted points.
@@ -1210,8 +1369,9 @@ final class DriveStateMachine {
 
         // Low-risk metadata improvement: if we're idle, remember that the wake came from SLC.
         // This doesn't start a drive; it just informs the eventual startReason if speed/motion confirms later.
+        pruneStalePendingStartReasonIfIdle()
         if state == .idle, pendingStartReason == nil {
-            pendingStartReason = .significantLocationChange
+            setPendingStartReason(.significantLocationChange)
         }
         
         // Request one-shot GPS to get fresh speed data for drive detection
@@ -1259,7 +1419,7 @@ final class DriveStateMachine {
                 driveLogger.log(.decision, type: "visit_departure_ignored", message: "Visit departure ignored: speed \(String(format: "%.1f", speedMPH))mph")
                 return
             }
-            pendingStartReason = .visitDeparture
+            setPendingStartReason(.visitDeparture)
             transition(to: .maybeDriving, trigger: "visit_departure")
             
         case .maybeDriving, .driving, .stopped, .ended, .pendingArrival:
@@ -1278,26 +1438,54 @@ final class DriveStateMachine {
         
         switch state {
         case .idle:
-            // Strong signal to start checking from idle
-            logger.info("Triggering .maybeDriving from Geofence Exit")
-            pendingStartReason = .geofenceExit
-            transition(to: .maybeDriving, trigger: "geofence_exit")
+            armGeofenceExitWake(regionId: regionId)
+            let speedMPH = currentSpeedMPH
+            if speedMPH >= maybeDrivingSpeedThreshold || hasRecentAutomotiveMotion {
+                setPendingStartReason(.geofenceExit)
+                logger.info("Triggering .maybeDriving from geofence exit with corroboration (speed \(String(format: "%.1f", speedMPH))mph, motion=\(self.hasRecentAutomotiveMotion))")
+                transition(to: .maybeDriving, trigger: "geofence_exit")
+            } else {
+                logger.info("Geofence exit used as wake-up signal - requesting one-shot GPS (speed \(String(format: "%.1f", speedMPH))mph)")
+                driveLogger.log(
+                    .decision,
+                    type: "geofence_exit_wakeup",
+                    message: "Exit wake-up; requesting corroborating GPS",
+                    metadata: [
+                        "speedMPH": String(format: "%.1f", speedMPH)
+                    ]
+                )
+                requestOneShotGPSIfNeeded(reason: "geofence_exit")
+
+                // In background, enter maybeDriving probe mode so departure can continue
+                // even if one-shot delivery is delayed by iOS scheduling.
+                if UIApplication.shared.applicationState != .active {
+                    logger.info("Background geofence exit wake - entering maybeDriving probe")
+                    setPendingStartReason(.geofenceExit)
+                    transition(to: .maybeDriving, trigger: "geofence_exit_background_probe")
+                }
+            }
             
         case .stopped:
-            // Exiting a region while stopped *might* imply moving again, but region edge jitter is common.
-            // Low-risk gate: require some speed evidence before resuming.
+            armGeofenceExitWake(regionId: regionId)
+            // Exiting a region while stopped is wake-up evidence only.
+            // Keep speed-gated resume to avoid missing departures in background.
             let speedMPH = currentSpeedMPH
-            pendingStartReason = .geofenceExit  // For logging consistency
             if speedMPH >= resumeSpeedThreshold {
-                logger.info("Resuming .driving from .stopped due to Geofence Exit (speed \(String(format: "%.1f", speedMPH))mph)")
-                transition(to: .driving, trigger: "geofence_exit_resume")
-            } else if speedMPH >= maybeDrivingSpeedThreshold {
-                logger.info("Leaving geofence while stopped - entering .maybeDriving (speed \(String(format: "%.1f", speedMPH))mph)")
-                transition(to: .maybeDriving, trigger: "geofence_exit_maybe")
-            } else {
-                logger.info("Ignoring geofence exit while stopped - insufficient speed evidence (\(String(format: "%.1f", speedMPH))mph)")
-                driveLogger.log(.decision, type: "geofence_exit_ignored", message: "Geofence exit ignored: speed \(String(format: "%.1f", speedMPH))mph")
+                setPendingStartReason(.geofenceExit)  // For logging consistency
+                logger.info("Geofence exit while stopped with speed evidence (\(String(format: "%.1f", speedMPH))mph) - resuming drive")
+                transition(to: .driving, trigger: "geofence_exit_resume_speed")
+                return
             }
+            logger.info("Geofence exit while stopped - requesting one-shot corroboration (\(String(format: "%.1f", speedMPH))mph)")
+            driveLogger.log(
+                .decision,
+                type: "geofence_exit_wakeup",
+                message: "Exit wake-up while stopped; requesting corroborating GPS",
+                metadata: [
+                    "speedMPH": String(format: "%.1f", speedMPH)
+                ]
+            )
+            requestOneShotGPSIfNeeded(reason: "geofence_exit_stopped")
             
         case .pendingArrival:
             // Explicit signal that we did NOT arrive (drove through)
@@ -1321,26 +1509,7 @@ final class DriveStateMachine {
         
         switch state {
         case .driving, .stopped:
-            if speedMPH < geofenceImmediateEndSpeedMPH {
-                logger.info("Geofence Entry at: \(regionId) - low speed \(String(format: "%.1f", speedMPH))mph, ending drive")
-                var meta = stateSnapshotMetadata()
-                meta["reason"] = "geofence_entry_low_speed"
-                driveLogger.log(.decision, type: "geofence_entry_end", message: "Entered \(regionId) at \(String(format: "%.1f", speedMPH))mph - ending", metadata: meta)
-                var place: Place?
-                if let location = currentLocation {
-                    place = placeVisitManager.bestMatchingPlace(for: location.coordinate)
-                }
-                if place == nil {
-                    place = placeVisitManager.place(for: regionId)
-                }
-                if let location = currentLocation, let place {
-                    placeVisitManager.startPlaceVisitForArrival(at: location.coordinate, place: place)
-                }
-                captureEndSnapshot(location: currentLocation, place: place)
-                pendingEndReason = .geofenceEntryLowSpeed
-                transition(to: .ended, trigger: "geofence_entry_low_speed")
-                return
-            }
+            // Geofence entry is a wake-up/validation signal, not an immediate drive end.
             // If already slow enough, start arrival validation immediately
             if speedMPH <= resumeSpeedThreshold {
                 logger.info("Geofence Entry at: \(regionId) - starting pending arrival validation (speed \(String(format: "%.1f", speedMPH))mph)")
@@ -1348,6 +1517,7 @@ final class DriveStateMachine {
                 meta["reason"] = "geofence_entry_pending"
                 driveLogger.log(.decision, type: "geofence_entry_pending", message: "Entered \(regionId), validating arrival...", metadata: meta)
                 logTraceIfEnabled(type: "pending_arrival_enter", message: "Entered pending arrival (geofence entry)", metadata: meta)
+                pendingEndReason = .geofenceEntry
                 transition(to: .pendingArrival, trigger: "geofence_entry")
             } else {
                 // Still moving - region is tracked, arrival will be checked when speed drops
@@ -1358,9 +1528,14 @@ final class DriveStateMachine {
             }
             
         case .maybeDriving:
-            // Haven't confirmed drive yet, but arrived at a place - cancel detection
-            logger.info("Canceling drive detection - arrived at saved place: \(regionId)")
-            transition(to: .idle, trigger: "geofence_entry_cancel")
+            // In maybeDriving, entry only cancels detection if we are actually slow.
+            if speedMPH <= resumeSpeedThreshold {
+                logger.info("Canceling drive detection - entered saved place at low speed: \(regionId)")
+                transition(to: .idle, trigger: "geofence_entry_cancel")
+            } else {
+                logger.info("Ignoring geofence entry while maybeDriving (speed \(String(format: "%.1f", speedMPH))mph)")
+                driveLogger.log(.decision, type: "geofence_entry_ignored", message: "Entry ignored in maybeDriving: speed \(String(format: "%.1f", speedMPH))mph")
+            }
             
         case .idle, .ended, .pendingArrival:
             // Not driving, ignore (but region is still tracked)
@@ -1409,12 +1584,12 @@ final class DriveStateMachine {
                         // If visit arrival already fired and we're backgrounded with stale GPS,
                         // prefer ending over resuming to avoid multi-hour false "driving" sessions
                         // while user is parked and walking indoors.
-                        if pendingEndReason == .visitArrival,
+                        if pendingEndReason == .visitArrival || pendingEndReason == .geofenceEntry,
                            UIApplication.shared.applicationState != .active {
                             logger.info("Pending arrival confirmed via visit+stale fallback in background (age \(Int(age))s)")
                             var place: Place?
                             if let loc = currentLocation {
-                                place = placeVisitManager.bestMatchingPlace(for: loc.coordinate)
+                                place = placeVisitManager.bestMatchingPlace(for: loc)
                                 captureEndSnapshot(location: loc, place: place)
                             } else {
                                 captureEndSnapshot()
@@ -1472,12 +1647,14 @@ final class DriveStateMachine {
 
                 // Finalize the arrival
                 if let location = currentLocation {
-                    let place = placeVisitManager.bestMatchingPlace(for: location.coordinate)
+                    let place = placeVisitManager.bestMatchingPlace(for: location)
                     captureEndSnapshot(location: location, place: place)
                 } else {
                     captureEndSnapshot()
                 }
-                pendingEndReason = .visitArrival
+                if pendingEndReason == nil {
+                    pendingEndReason = .visitArrival
+                }
                 transition(to: .ended, trigger: "arrival_confirmed")
             }
         }
@@ -1487,9 +1664,15 @@ final class DriveStateMachine {
     
     private func transition(to newState: DriveState, trigger: String = "direct") {
         let oldState = state
+
+        // Arrival validation was rejected/resumed; discard any pending arrival end reason.
+        if oldState == .pendingArrival && newState == .driving {
+            pendingEndReason = nil
+        }
         
         // Cancel one-shot GPS when leaving idle (drive detection succeeded)
         if oldState == .idle && newState != .idle {
+            clearGeofenceExitWake()
             locationManager?.cancelOneShotLocation()
         }
         
@@ -1608,6 +1791,7 @@ final class DriveStateMachine {
         case .pendingArrival:
             pendingArrivalTimer?.cancel()
             pendingArrivalTimer = nil
+            pendingArrivalEnteredAt = nil
             
         case .driving:
             sustainedLowSpeedStart = nil
@@ -1624,6 +1808,10 @@ final class DriveStateMachine {
         case .idle:
             // Clean up any active drive reference (but don't delete)
             activeDrive = nil
+            if !activeRouteCoordinates.isEmpty {
+                activeRouteCoordinates = []
+                routePointVersion &+= 1
+            }
             // Clear any buffered locations from failed maybeDriving
             locationBuffer.clear()
             idleHighSpeedStart = nil
@@ -1633,8 +1821,9 @@ final class DriveStateMachine {
             insideRegionIds.removeAll()
             // Clear pending reasons to prevent stale values carrying to next drive
             // (e.g., if maybeDriving → idle via verification timeout)
-            pendingStartReason = nil
+            clearPendingStartReason()
             pendingEndReason = nil
+            clearGeofenceExitWake()
             lastOnFootAt = nil
             lowSpeedCandidateStart = nil
             stoppedResumeCandidateStart = nil
@@ -1648,6 +1837,7 @@ final class DriveStateMachine {
             
         case .pendingArrival:
             locationManager?.enableHighAccuracy(reason: "driving")
+            pendingArrivalEnteredAt = Date()
             startPendingArrivalTimer()
             
         case .maybeDriving:
@@ -1672,7 +1862,7 @@ final class DriveStateMachine {
                 let reason = pendingStartReason ?? .motionActivity
                 let bufferedLocations = locationBuffer.consumeAll()
                 createNewDrive(startReason: reason, bufferedLocations: bufferedLocations)
-                pendingStartReason = nil // Consume
+                clearPendingStartReason() // Consume
                 
                 // Send notification (only on fresh drive start)
                 NotificationService.shared.sendDriveStarted()
@@ -1766,14 +1956,41 @@ final class DriveStateMachine {
     }
     
     private func startPendingArrivalTimer() {
+        startPendingArrivalTimer(timeout: pendingArrivalValidationTimeout)
+    }
+
+    private func startPendingArrivalTimer(timeout: TimeInterval) {
         // 25-30s window to validate arrival
-        let timeout: TimeInterval = 30.0
         logger.debug("Starting pending arrival timer: \(Int(timeout))s")
         pendingArrivalTimer = Task {
             try? await Task.sleep(for: .seconds(timeout))
             guard !Task.isCancelled else { return }
             handle(.timerExpired(.pendingArrival))
         }
+    }
+
+    private func reconcilePendingArrivalAfterWake(now: Date = Date()) {
+        guard state == .pendingArrival else { return }
+
+        guard let enteredAt = pendingArrivalEnteredAt else {
+            pendingArrivalEnteredAt = now
+            pendingArrivalTimer?.cancel()
+            startPendingArrivalTimer(timeout: pendingArrivalValidationTimeout)
+            return
+        }
+
+        let elapsed = now.timeIntervalSince(enteredAt)
+        if elapsed >= pendingArrivalValidationTimeout {
+            logger.info("[PENDING-ARRIVAL] Foreground reconcile: timeout elapsed (\(Int(elapsed))s), validating now")
+            pendingArrivalTimer?.cancel()
+            pendingArrivalTimer = nil
+            handle(.timerExpired(.pendingArrival))
+            return
+        }
+
+        let remaining = max(1.0, pendingArrivalValidationTimeout - elapsed)
+        pendingArrivalTimer?.cancel()
+        startPendingArrivalTimer(timeout: remaining)
     }
     
     // MARK: - Durable Persistence Helpers
@@ -1893,6 +2110,8 @@ final class DriveStateMachine {
         
         modelContext.insert(drive)
         activeDrive = drive
+        activeRouteCoordinates = drive.pointsChronological.map { $0.coordinate }
+        routePointVersion &+= 1
         pointsSinceLastSave = 0
         // Only mark first-fix as recorded if we actually accepted a point (and set firstLocationFixTime).
         // If the initial location was rejected (e.g. poor accuracy), we still want recordFirstFixIfNeeded(...) to run later.
@@ -1939,6 +2158,15 @@ final class DriveStateMachine {
         logger.info("Created new drive: \(drive.shortId)")
         logger.info("[SETTINGS] stoppedTimeout=\(Int(self.stoppedTimeoutMinutes))min stoppedDetection=\(Int(self.stoppedDetectionDuration))s drivingConfirm=\(Int(self.drivingConfirmationDuration))s")
     }
+
+    private func appendActiveRouteCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        if let last = activeRouteCoordinates.last,
+           abs(last.latitude - coordinate.latitude) < 0.0000005,
+           abs(last.longitude - coordinate.longitude) < 0.0000005 {
+            return
+        }
+        activeRouteCoordinates.append(coordinate)
+    }
     
     private func finalizeDrive(endReason: DriveEndReason = .inactivityTimeout) {
         guard let drive = activeDrive else { return }
@@ -1954,7 +2182,7 @@ final class DriveStateMachine {
             }
         }
         if drive.endPlaceId == nil, let location = currentLocation {
-            if let place = placeVisitManager.bestMatchingPlace(for: location.coordinate) {
+            if let place = placeVisitManager.bestMatchingPlace(for: location) {
                 drive.endPlaceId = place.placeId
             }
         }

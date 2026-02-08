@@ -102,8 +102,13 @@ struct DriveDetailView: View {
                 
                 // Saved places (only those relevant to this drive)
                 ForEach(relevantPlaces) { place in
-                    MapCircle(center: place.coordinate, radius: place.radiusMeters)
-                        .foregroundStyle(.orange.opacity(0.15))
+                    let ring = geofenceRingCoordinates(
+                        center: place.coordinate,
+                        radiusMeters: place.clampedRadiusMeters
+                    )
+                    MapPolyline(coordinates: ring)
+                        .stroke(.orange.opacity(0.22), lineWidth: 4)
+                    MapPolyline(coordinates: ring)
                         .stroke(.orange, lineWidth: 2)
                     
                     Annotation(place.name, coordinate: place.coordinate) {
@@ -475,8 +480,13 @@ struct ExpandedMapView: View {
                 
                 // Saved places (only those relevant to this drive)
                 ForEach(relevantPlaces) { place in
-                    MapCircle(center: place.coordinate, radius: place.radiusMeters)
-                        .foregroundStyle(.orange.opacity(0.15))
+                    let ring = geofenceRingCoordinates(
+                        center: place.coordinate,
+                        radiusMeters: place.clampedRadiusMeters
+                    )
+                    MapPolyline(coordinates: ring)
+                        .stroke(.orange.opacity(0.22), lineWidth: 4)
+                    MapPolyline(coordinates: ring)
                         .stroke(.orange, lineWidth: 2)
                     
                     Annotation(place.name, coordinate: place.coordinate) {
@@ -749,6 +759,31 @@ struct EventCountBadge: View {
         }
         .frame(maxWidth: .infinity)
     }
+}
+
+// MARK: - Geofence Ring Helper
+
+fileprivate func geofenceRingCoordinates(
+    center: CLLocationCoordinate2D,
+    radiusMeters: CLLocationDistance,
+    segments: Int = 96
+) -> [CLLocationCoordinate2D] {
+    let clampedSegments = max(24, min(192, segments))
+    let centerPoint = MKMapPoint(center)
+    let pointsPerMeter = MKMapPointsPerMeterAtLatitude(center.latitude)
+    let mapRadius = radiusMeters * pointsPerMeter
+
+    var coordinates: [CLLocationCoordinate2D] = []
+    coordinates.reserveCapacity(clampedSegments + 1)
+
+    for index in 0...clampedSegments {
+        let theta = (Double(index) / Double(clampedSegments)) * 2.0 * .pi
+        let x = centerPoint.x + (mapRadius * cos(theta))
+        let y = centerPoint.y + (mapRadius * sin(theta))
+        coordinates.append(MKMapPoint(x: x, y: y).coordinate)
+    }
+
+    return coordinates
 }
 
 #Preview {

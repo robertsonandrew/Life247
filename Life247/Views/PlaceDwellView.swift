@@ -162,7 +162,7 @@ struct PlaceDwellView: View {
                 .font(.headline)
                 .foregroundStyle(.white)
 
-            nerdyRow(label: "Radius", value: "\(Int(place.radiusMeters)) m")
+            nerdyRow(label: "Radius", value: "\(Int(place.clampedRadiusMeters)) m")
             nerdyRow(label: "Center", value: String(format: "%.5f, %.5f", place.latitude, place.longitude))
 
             if let activeVisit {

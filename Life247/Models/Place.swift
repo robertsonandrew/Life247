@@ -13,6 +13,9 @@ import CoreLocation
 /// Used for matching stops to meaningful places (Home, Work, Gym, etc.)
 @Model
 final class Place {
+    static let minUserRadiusMeters: Double = 20
+    static let maxUserRadiusMeters: Double = 500
+
     /// Unique identifier for geofence registration (stable across app launches)
     /// Default value allows migration from existing Places without this property
     var placeId: UUID = UUID()
@@ -62,22 +65,30 @@ final class Place {
     }
     
     // MARK: - Effective Radius
-    
-    /// The effective radius used for containment checks and geofence registration.
-    /// Uses a minimum of 50 meters to ensure reliable geofence triggering on iOS.
-    /// This prevents the "dead zone" where user-defined small radii (e.g., 20m) would
-    /// cause geofence entry (at 50m) but containment check failure (at 20m).
+
+    /// Radius constrained to the UI-editable range.
+    /// This protects rendering/geofencing from legacy outlier values.
+    var clampedRadiusMeters: Double {
+        min(Self.maxUserRadiusMeters, max(Self.minUserRadiusMeters, radiusMeters))
+    }
+
+    /// Radius used for in-app containment decisions (dwell matching, map display).
+    /// This tracks what the user configured in the editor (after clamping to UI bounds).
+    ///
+    /// Note: Geofence monitoring radius is computed separately at registration time and may be larger.
     var effectiveRadius: Double {
-        max(50.0, radiusMeters)
+        clampedRadiusMeters
     }
     
     // MARK: - Containment Check (Pure, no side effects)
     
     /// Returns true if the given coordinate is within this place's effective radius.
-    func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
+    /// - Parameter additionalBufferMeters: Optional buffer (for GPS uncertainty handling).
+    func contains(_ coordinate: CLLocationCoordinate2D, additionalBufferMeters: CLLocationDistance = 0) -> Bool {
         let center = CLLocation(latitude: latitude, longitude: longitude)
         let point = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        return center.distance(from: point) <= effectiveRadius
+        let bufferedRadius = effectiveRadius + max(0, additionalBufferMeters)
+        return center.distance(from: point) <= bufferedRadius
     }
     
     /// Distance from this place to a given coordinate.

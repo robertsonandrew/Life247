@@ -24,18 +24,31 @@ final class PlaceVisitManager {
     
     /// Summary of active dwell session for lightweight UI consumption
     struct ActiveDwellSummary {
+        let placeId: UUID?
         let placeName: String
         let placeIcon: String
         let arrivalTime: Date
+        let placeCoordinate: CLLocationCoordinate2D
+        let placeRadiusMeters: Double
     }
     
     /// Current active dwell session (if any), suitable for lightweight UI.
     var activeDwellSummary: ActiveDwellSummary? {
         guard let activePlaceVisit, activePlaceVisit.departureTime == nil else { return nil }
+        let linkedPlace = activePlaceVisit.place
+        let snapshotCoordinate = CLLocationCoordinate2D(
+            latitude: activePlaceVisit.placeLatitude,
+            longitude: activePlaceVisit.placeLongitude
+        )
+        let snapshotRadius = min(Place.maxUserRadiusMeters, max(Place.minUserRadiusMeters, activePlaceVisit.placeRadiusMeters))
+
         return ActiveDwellSummary(
+            placeId: linkedPlace?.placeId,
             placeName: activePlaceVisit.placeName,
             placeIcon: activePlaceVisit.placeIcon,
-            arrivalTime: activePlaceVisit.arrivalTime
+            arrivalTime: activePlaceVisit.arrivalTime,
+            placeCoordinate: linkedPlace?.coordinate ?? snapshotCoordinate,
+            placeRadiusMeters: linkedPlace?.clampedRadiusMeters ?? snapshotRadius
         )
     }
     
@@ -121,14 +134,40 @@ final class PlaceVisitManager {
     /// Find the best matching saved Place for a coordinate (smallest containing place)
     /// Uses cached places for performance
     func bestMatchingPlace(for coordinate: CLLocationCoordinate2D) -> Place? {
+        bestMatchingPlace(for: coordinate, additionalBufferMeters: 0)
+    }
+
+    /// Find the best matching saved Place for a location sample.
+    /// Uses a small accuracy-derived buffer to reduce false negatives near place edges.
+    func bestMatchingPlace(for location: CLLocation) -> Place? {
+        let buffer = containmentBuffer(for: location.horizontalAccuracy)
+        return bestMatchingPlace(for: location.coordinate, additionalBufferMeters: buffer)
+    }
+
+    private func bestMatchingPlace(
+        for coordinate: CLLocationCoordinate2D,
+        additionalBufferMeters: CLLocationDistance
+    ) -> Place? {
         let places = getAllPlaces()
         guard !places.isEmpty else { return nil }
 
-        let matches = places
-            .filter { $0.contains(coordinate) }
-            .sorted { $0.distance(to: coordinate) < $1.distance(to: coordinate) }
+        let matches = places.filter { $0.contains(coordinate, additionalBufferMeters: additionalBufferMeters) }
+        guard !matches.isEmpty else { return nil }
 
-        return matches.first
+        return matches.min { lhs, rhs in
+            let lhsRadius = lhs.effectiveRadius
+            let rhsRadius = rhs.effectiveRadius
+            if abs(lhsRadius - rhsRadius) > 0.5 {
+                return lhsRadius < rhsRadius
+            }
+            return lhs.distance(to: coordinate) < rhs.distance(to: coordinate)
+        }
+    }
+
+    private func containmentBuffer(for horizontalAccuracy: CLLocationAccuracy) -> CLLocationDistance {
+        guard horizontalAccuracy > 0 else { return 0 }
+        // Conservative buffer: enough to absorb normal jitter without making containment too loose.
+        return min(60, max(0, horizontalAccuracy * 0.75))
     }
 
     /// Find a saved Place by geofence region identifier (UUID string).

@@ -248,6 +248,63 @@ final class LocationManager: NSObject, ObservableObject {
     }
     
     // MARK: - Geofencing
+
+    /// Reliability floor for region monitoring radius.
+    /// iOS can under-deliver very small geofences in background depending on conditions.
+    private static let geofenceReliabilityFloorMeters: CLLocationDistance = 75
+    private static let geofenceAccuracyBufferScale: Double = 1.25
+    private static let geofenceAccuracyBufferCapMeters: CLLocationDistance = 120
+    private static let geofenceUserMinMeters: CLLocationDistance = Place.minUserRadiusMeters
+    private static let geofenceUserMaxMeters: CLLocationDistance = Place.maxUserRadiusMeters
+
+    /// Best available current coordinate from CoreLocation cache.
+    @MainActor
+    var currentCoordinate: CLLocationCoordinate2D? {
+        locationManager.location?.coordinate
+    }
+
+    /// Best available horizontal accuracy from CoreLocation cache.
+    @MainActor
+    var currentHorizontalAccuracy: CLLocationAccuracy? {
+        guard let accuracy = locationManager.location?.horizontalAccuracy, accuracy > 0 else {
+            return nil
+        }
+        return accuracy
+    }
+
+    /// Shared monitoring-radius policy used by registration and UI.
+    static func recommendedMonitoringRadius(
+        forUserRadiusMeters userRadiusMeters: CLLocationDistance,
+        horizontalAccuracy: CLLocationAccuracy? = nil,
+        maxSupportedRadius: CLLocationDistance = .greatestFiniteMagnitude
+    ) -> CLLocationDistance {
+        let clampedUserRadius = min(geofenceUserMaxMeters, max(geofenceUserMinMeters, userRadiusMeters))
+
+        let accuracyBuffer: CLLocationDistance
+        if let horizontalAccuracy, horizontalAccuracy > 0 {
+            accuracyBuffer = min(
+                geofenceAccuracyBufferCapMeters,
+                max(0, horizontalAccuracy * geofenceAccuracyBufferScale)
+            )
+        } else {
+            accuracyBuffer = 0
+        }
+
+        let desiredRadius = max(clampedUserRadius, geofenceReliabilityFloorMeters, accuracyBuffer)
+        let supportedCeiling = max(geofenceReliabilityFloorMeters, maxSupportedRadius)
+        return min(desiredRadius, supportedCeiling)
+    }
+
+    /// Compute geofence monitoring radius from user radius + runtime conditions.
+    /// This is intentionally separate from place containment/display radius.
+    @MainActor
+    func monitoringRadius(forUserRadiusMeters userRadiusMeters: CLLocationDistance) -> CLLocationDistance {
+        Self.recommendedMonitoringRadius(
+            forUserRadiusMeters: userRadiusMeters,
+            horizontalAccuracy: locationManager.location?.horizontalAccuracy,
+            maxSupportedRadius: locationManager.maximumRegionMonitoringDistance
+        )
+    }
     
     /// Sync monitored regions with the provided list of circular regions
     /// - Parameter forceRefresh: If true, re-registers all regions to update their settings (entry/exit notifications)
@@ -447,4 +504,3 @@ extension LocationManager: CLLocationManagerDelegate {
         }
     }
 }
-

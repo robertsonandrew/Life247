@@ -11,6 +11,15 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+### Test Setup
+```bash
+cd server
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+```
+
 ### Docker
 ```bash
 cd server
@@ -39,12 +48,23 @@ LIFE247_API_KEY=your-secret-key
 | GET | `/health` | Health check |
 | POST | `/drives` | Upload a drive |
 | GET | `/drives` | List drives (paginated) |
+| GET | `/drives/summary` | List lightweight drive summaries (paginated) |
 | GET | `/drives/{id}` | Get single drive |
 | DELETE | `/drives/{id}` | Delete drive |
+| POST | `/visits` | Upload a place visit |
+| GET | `/visits` | List place visits (paginated) |
+| DELETE | `/visits/{id}` | Delete a place visit |
+| POST | `/places/sync` | Upsert a place |
+| GET | `/places` | List places |
+| DELETE | `/places/{id}` | Soft-delete place |
+| GET | `/stats/overview` | KPI summary for selected range |
+| GET | `/stats/activity` | Daily/weekly activity buckets |
+| GET | `/stats/habits` | Weekday/hour habits and streaks |
+| GET | `/stats/places` | Place dwell analytics |
 
 ## Authentication
 
-All `/drives` endpoints require `X-API-Key` header.
+All data endpoints require `X-API-Key` header.
 
 ## iOS App Configuration
 

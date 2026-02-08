@@ -108,5 +108,6 @@ struct SaveAsPlaceView: View {
     NavigationStack {
         SaveAsPlaceView(coordinate: CLLocationCoordinate2D(latitude: 36.0, longitude: -95.9))
     }
+    .environmentObject(LocationManager())
     .modelContainer(for: Place.self, inMemory: true)
 }

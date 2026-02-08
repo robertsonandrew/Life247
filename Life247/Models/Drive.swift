@@ -460,6 +460,7 @@ final class Drive {
                 }
                 let newPoint = LocationPoint(from: location)
                 points.append(newPoint)
+                invalidatePointsCache()
                 updateLatestPointCache(with: newPoint)
                 distanceGapSkipCount += 1
                 distanceGapSkippedMeters += distance
@@ -484,6 +485,7 @@ final class Drive {
         // Point passed all filters - add it
         let newPoint = LocationPoint(from: location)
         points.append(newPoint)
+        invalidatePointsCache()
         updateLatestPointCache(with: newPoint)
         return (true, nil, nil)
     }

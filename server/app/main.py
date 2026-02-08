@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
-from .routes import drives, visits, places
+from .routes import drives, visits, places, stats
 
 app = FastAPI(
     title="Life247 Drive Sync API",
@@ -24,6 +24,7 @@ app.add_middleware(
 app.include_router(drives.router, tags=["drives"])
 app.include_router(visits.router, tags=["visits"])
 app.include_router(places.router, tags=["places"])
+app.include_router(stats.router, tags=["stats"])
 
 # Static files directory
 static_dir = Path(__file__).parent / "static"
@@ -45,4 +46,3 @@ def root():
 def api_docs_redirect():
     """Redirect to API docs"""
     return {"message": "Visit /docs for API documentation"}
-

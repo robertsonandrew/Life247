@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Header, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -65,8 +65,7 @@ class PlaceVisitResponse(BaseModel):
     iosVersion: Optional[str] = None
     appVersion: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 def verify_api_key(x_api_key: str = Header(...)):

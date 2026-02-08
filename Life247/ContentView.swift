@@ -96,6 +96,7 @@ struct ContentView: View {
                 )
                 .opacity(selectedTab == .map ? 1 : 0)
                 .zIndex(selectedTab == .map ? 1 : 0)
+                .allowsHitTesting(selectedTab == .map)
                 
                 // History and Settings are conditionally rendered
                 if selectedTab == .history {
@@ -203,4 +204,3 @@ struct ContentView: View {
     )
     .modelContainer(for: Drive.self, inMemory: true)
 }
-

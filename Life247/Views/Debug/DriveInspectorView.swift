@@ -19,6 +19,7 @@ struct DriveInspectorView: View {
     @State private var shareItems: [Any] = []
     @State private var cachedExportText: String?
     @State private var cachedExportJSONL: String?
+    @State private var cachedExportBundleJSON: String?
     @State private var isGeneratingExport = false
     
     private var filteredEntries: [DriveLogEntry] {
@@ -66,11 +67,13 @@ struct DriveInspectorView: View {
             )
         }
         .task {
-            // Pre-generate both human report and machine-readable JSONL.
+            // Pre-generate all export formats for snappy sharing.
             async let reportText = generateExportTextAsync()
             async let reportJSONL = generateExportJSONLAsync()
+            async let reportBundleJSON = generateExportBundleJSONAsync()
             cachedExportText = await reportText
             cachedExportJSONL = await reportJSONL
+            cachedExportBundleJSON = await reportBundleJSON
         }
     }
 
@@ -338,6 +341,178 @@ struct DriveInspectorView: View {
         }
     }
 
+    private struct ExportRoutePoint: Codable {
+        let timestamp: String
+        let relativeSeconds: Double
+        let latitude: Double
+        let longitude: Double
+        let speedMps: Double
+        let speedMph: Double
+        let altitudeM: Double
+        let horizontalAccuracyM: Double
+        let verticalAccuracyM: Double?
+        let courseDeg: Double?
+        let courseAccuracyDeg: Double?
+        let speedAccuracyMps: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case timestamp
+            case relativeSeconds = "relative_seconds"
+            case latitude
+            case longitude
+            case speedMps = "speed_mps"
+            case speedMph = "speed_mph"
+            case altitudeM = "altitude_m"
+            case horizontalAccuracyM = "horizontal_accuracy_m"
+            case verticalAccuracyM = "vertical_accuracy_m"
+            case courseDeg = "course_deg"
+            case courseAccuracyDeg = "course_accuracy_deg"
+            case speedAccuracyMps = "speed_accuracy_mps"
+        }
+    }
+
+    private struct ExportAccelerationEvent: Codable {
+        let eventId: String
+        let timestamp: String
+        let relativeSeconds: Double
+        let eventType: String
+        let latitude: Double
+        let longitude: Double
+        let gForceMagnitude: Double
+        let longitudinalG: Double
+        let lateralG: Double
+        let gpsSpeedMps: Double
+        let gpsSpeedMph: Double
+        let gpsSpeedDeltaMps: Double?
+        let gpsCorroborated: Bool
+        let durationSeconds: Double?
+        let headingDeg: Double
+
+        enum CodingKeys: String, CodingKey {
+            case eventId = "event_id"
+            case timestamp
+            case relativeSeconds = "relative_seconds"
+            case eventType = "event_type"
+            case latitude
+            case longitude
+            case gForceMagnitude = "g_force_magnitude"
+            case longitudinalG = "longitudinal_g"
+            case lateralG = "lateral_g"
+            case gpsSpeedMps = "gps_speed_mps"
+            case gpsSpeedMph = "gps_speed_mph"
+            case gpsSpeedDeltaMps = "gps_speed_delta_mps"
+            case gpsCorroborated = "gps_corroborated"
+            case durationSeconds = "duration_seconds"
+            case headingDeg = "heading_deg"
+        }
+    }
+
+    private struct ExportDriveContext: Codable {
+        let driveId: String
+        let driveShortId: String
+        let startTime: String
+        let endTime: String?
+        let isActive: Bool
+        let startReason: String?
+        let endReason: String?
+        let iosVersion: String?
+        let deviceModel: String?
+        let appVersion: String?
+        let lowPowerModeAtStart: Bool?
+        let batteryLevelAtStart: Float?
+        let batteryLevelAtEnd: Float?
+
+        enum CodingKeys: String, CodingKey {
+            case driveId = "drive_id"
+            case driveShortId = "drive_short_id"
+            case startTime = "start_time"
+            case endTime = "end_time"
+            case isActive = "is_active"
+            case startReason = "start_reason"
+            case endReason = "end_reason"
+            case iosVersion = "ios_version"
+            case deviceModel = "device_model"
+            case appVersion = "app_version"
+            case lowPowerModeAtStart = "low_power_mode_at_start"
+            case batteryLevelAtStart = "battery_level_at_start"
+            case batteryLevelAtEnd = "battery_level_at_end"
+        }
+    }
+
+    private struct ExportDriveSummary: Codable {
+        let durationSeconds: Double
+        let distanceMeters: Double
+        let distanceMiles: Double
+        let averageSpeedMph: Double
+        let maxSpeedMph: Double
+        let detectionLatencySeconds: Double?
+        let confirmationLatencySeconds: Double?
+        let locationSampleCount: Int
+        let droppedSampleCount: Int
+        let locationPauseCount: Int
+        let maxGapSeconds: Double
+        let distanceGapSkipCount: Int
+        let distanceGapSkippedMeters: Double
+        let bufferedPointCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case durationSeconds = "duration_seconds"
+            case distanceMeters = "distance_meters"
+            case distanceMiles = "distance_miles"
+            case averageSpeedMph = "average_speed_mph"
+            case maxSpeedMph = "max_speed_mph"
+            case detectionLatencySeconds = "detection_latency_seconds"
+            case confirmationLatencySeconds = "confirmation_latency_seconds"
+            case locationSampleCount = "location_sample_count"
+            case droppedSampleCount = "dropped_sample_count"
+            case locationPauseCount = "location_pause_count"
+            case maxGapSeconds = "max_gap_seconds"
+            case distanceGapSkipCount = "distance_gap_skip_count"
+            case distanceGapSkippedMeters = "distance_gap_skipped_meters"
+            case bufferedPointCount = "buffered_point_count"
+        }
+    }
+
+    private struct ExportDiagnostics: Codable {
+        let timelineEventCount: Int
+        let routePointCount: Int
+        let accelerationEventCount: Int
+        let categoryCounts: [String: Int]
+        let eventTypeCounts: [String: Int]
+
+        enum CodingKeys: String, CodingKey {
+            case timelineEventCount = "timeline_event_count"
+            case routePointCount = "route_point_count"
+            case accelerationEventCount = "acceleration_event_count"
+            case categoryCounts = "category_counts"
+            case eventTypeCounts = "event_type_counts"
+        }
+    }
+
+    private struct JSONDriveExportBundle: Codable {
+        let schemaVersion: Int
+        let generatedAt: String
+        let exportSource: String
+        let drive: ExportDriveContext
+        let summary: ExportDriveSummary
+        let timeline: [JSONLTimelineEvent]
+        let routePoints: [ExportRoutePoint]
+        let accelerationEvents: [ExportAccelerationEvent]
+        let diagnostics: ExportDiagnostics
+
+        enum CodingKeys: String, CodingKey {
+            case schemaVersion = "schema_version"
+            case generatedAt = "generated_at"
+            case exportSource = "export_source"
+            case drive
+            case summary
+            case timeline
+            case routePoints = "route_points"
+            case accelerationEvents = "acceleration_events"
+            case diagnostics
+        }
+    }
+
     @MainActor
     private func prepareShareExport() async {
         isGeneratingExport = true
@@ -361,24 +536,39 @@ struct DriveInspectorView: View {
             reportJSONL = generated
         }
 
-        shareItems = writeShareItems(reportText: reportText, reportJSONL: reportJSONL)
+        let reportBundleJSON: String
+        if let cachedExportBundleJSON {
+            reportBundleJSON = cachedExportBundleJSON
+        } else {
+            let generated = await generateExportBundleJSONAsync()
+            cachedExportBundleJSON = generated
+            reportBundleJSON = generated
+        }
+
+        shareItems = writeShareItems(
+            reportText: reportText,
+            reportJSONL: reportJSONL,
+            reportBundleJSON: reportBundleJSON
+        )
         showingShareSheet = true
     }
 
-    private func writeShareItems(reportText: String, reportJSONL: String) -> [Any] {
+    private func writeShareItems(reportText: String, reportJSONL: String, reportBundleJSON: String) -> [Any] {
         let tempDir = FileManager.default.temporaryDirectory
         let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let baseName = "drive_\(drive.shortId)_\(timestamp)"
         let textURL = tempDir.appendingPathComponent("\(baseName).txt")
         let jsonlURL = tempDir.appendingPathComponent("\(baseName).jsonl")
+        let jsonURL = tempDir.appendingPathComponent("\(baseName).json")
 
         do {
             try reportText.write(to: textURL, atomically: true, encoding: .utf8)
             try reportJSONL.write(to: jsonlURL, atomically: true, encoding: .utf8)
-            return [textURL, jsonlURL]
+            try reportBundleJSON.write(to: jsonURL, atomically: true, encoding: .utf8)
+            return [textURL, jsonURL, jsonlURL]
         } catch {
             // Fallback keeps sharing functional even if temp file writes fail.
-            return [reportText, reportJSONL]
+            return [reportText, reportBundleJSON, reportJSONL]
         }
     }
 
@@ -520,34 +710,12 @@ struct DriveInspectorView: View {
             lines.reserveCapacity(entries.count)
 
             for entry in entries {
-                let meta = entry.metadata
-                let seq = entry.seq > 0 ? entry.seq : entry.index
-                let reasonCode = Self.firstValue(
-                    for: ["reason_code", "reason", "rule", "input_startReason", "input_endReason"],
-                    in: meta
-                ) ?? entry.eventType
-
-                let exportEvent = JSONLTimelineEvent(
-                    schemaVersion: 1,
+                let exportEvent = Self.buildTimelineEvent(
+                    entry: entry,
                     driveId: driveId,
                     driveShortId: driveShortId,
-                    seq: seq,
-                    eventId: entry.eventId,
-                    timestamp: iso.string(from: entry.timestamp),
-                    relativeSeconds: max(0, entry.timestamp.timeIntervalSince(driveStartTime)),
-                    category: entry.category,
-                    eventType: entry.eventType,
-                    message: entry.message,
-                    reasonCode: reasonCode,
-                    stateFrom: Self.firstValue(for: ["state_from", "fromState", "input_fromState"], in: meta),
-                    stateTo: Self.firstValue(for: ["state_to", "toState", "input_toState"], in: meta),
-                    trigger: Self.firstValue(for: ["trigger", "input_trigger"], in: meta),
-                    appState: Self.firstValue(for: ["app_state", "appState", "state", "input_appState"], in: meta),
-                    accM: Self.firstDouble(for: ["acc_m", "accuracyM", "accuracy"], in: meta),
-                    speedMph: Self.firstDouble(for: ["speed_mph", "speedMPH", "speed", "input_speed"], in: meta),
-                    locAgeS: Self.firstDouble(for: ["loc_age_s", "ageSeconds", "age"], in: meta),
-                    gapS: Self.firstDouble(for: ["gap_s", "gapSeconds"], in: meta),
-                    metadata: meta
+                    driveStartTime: driveStartTime,
+                    iso: iso
                 )
 
                 if let data = try? encoder.encode(exportEvent),
@@ -557,6 +725,247 @@ struct DriveInspectorView: View {
             }
             return lines.joined(separator: "\n")
         }.value
+    }
+
+    /// Async structured JSON export: includes summary, timeline, points, and acceleration events.
+    private func generateExportBundleJSONAsync() async -> String {
+        let driveId = drive.id.uuidString
+        let driveShortId = drive.shortId
+        let driveStartTime = drive.startTime
+        let driveEndTime = drive.endTime
+        let startReason = drive.startReason?.rawValue
+        let endReason = drive.endReason?.rawValue
+        let iosVersion = drive.iosVersion
+        let deviceModel = drive.deviceModel
+        let appVersion = drive.appVersion
+        let lowPowerModeAtStart = drive.lowPowerModeAtStart
+        let batteryLevelAtStart = drive.batteryLevelAtStart
+        let batteryLevelAtEnd = drive.batteryLevelAtEnd
+        let isActive = drive.isActive
+
+        let durationSeconds = drive.duration
+        let distanceMeters = drive.distanceMeters
+        let distanceMiles = drive.distanceMiles
+        let averageSpeedMph = drive.averageSpeedMPH
+        let maxSpeedMph = drive.maxSpeedMPH
+        let detectionLatencySeconds = drive.detectionLatency
+        let confirmationLatencySeconds = drive.confirmationLatency
+        let locationSampleCount = drive.locationSampleCount
+        let droppedSampleCount = drive.droppedSampleCount
+        let locationPauseCount = drive.locationPauseCount
+        let maxGapSeconds = drive.maxGapBetweenSamples
+        let distanceGapSkipCount = drive.distanceGapSkipCount
+        let distanceGapSkippedMeters = drive.distanceGapSkippedMeters
+        let bufferedPointCount = drive.bufferedPointCount
+
+        let entries = drive.logEntriesChronological.enumerated().map { index, entry in
+            (
+                index: index + 1,
+                seq: entry.sequenceNumber ?? 0,
+                eventId: entry.id.uuidString,
+                timestamp: entry.timestamp,
+                category: entry.category.rawValue,
+                eventType: entry.eventType,
+                message: entry.message,
+                metadata: entry.metadata ?? [:]
+            )
+        }
+
+        let routePoints = drive.pointsChronological.map { point in
+            (
+                timestamp: point.timestamp,
+                latitude: point.latitude,
+                longitude: point.longitude,
+                speedMps: point.speed,
+                speedMph: point.speedMPH,
+                altitudeM: point.altitude,
+                horizontalAccuracyM: point.horizontalAccuracy,
+                verticalAccuracyM: point.verticalAccuracy,
+                courseDeg: point.course,
+                courseAccuracyDeg: point.courseAccuracy,
+                speedAccuracyMps: point.speedAccuracy
+            )
+        }
+
+        let accelerationEvents = drive.accelerationEvents.sorted { $0.timestamp < $1.timestamp }.map { event in
+            (
+                eventId: event.id.uuidString,
+                timestamp: event.timestamp,
+                eventType: event.eventTypeRaw,
+                latitude: event.latitude,
+                longitude: event.longitude,
+                gForceMagnitude: event.gForceMagnitude,
+                longitudinalG: event.longitudinalG,
+                lateralG: event.lateralG,
+                gpsSpeedMps: event.gpsSpeed,
+                gpsSpeedMph: event.speedMPH,
+                gpsSpeedDeltaMps: event.gpsSpeedDelta,
+                gpsCorroborated: event.gpsCorroborated,
+                durationSeconds: event.durationSeconds,
+                headingDeg: event.heading
+            )
+        }
+
+        return await Task.detached(priority: .userInitiated) {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+            let timeline = entries.map {
+                Self.buildTimelineEvent(
+                    entry: $0,
+                    driveId: driveId,
+                    driveShortId: driveShortId,
+                    driveStartTime: driveStartTime,
+                    iso: iso
+                )
+            }
+
+            let exportRoutePoints = routePoints.map { point in
+                ExportRoutePoint(
+                    timestamp: iso.string(from: point.timestamp),
+                    relativeSeconds: max(0, point.timestamp.timeIntervalSince(driveStartTime)),
+                    latitude: point.latitude,
+                    longitude: point.longitude,
+                    speedMps: point.speedMps,
+                    speedMph: point.speedMph,
+                    altitudeM: point.altitudeM,
+                    horizontalAccuracyM: point.horizontalAccuracyM,
+                    verticalAccuracyM: Self.sanitizedAccuracy(point.verticalAccuracyM),
+                    courseDeg: point.courseDeg >= 0 ? point.courseDeg : nil,
+                    courseAccuracyDeg: Self.sanitizedAccuracy(point.courseAccuracyDeg),
+                    speedAccuracyMps: Self.sanitizedAccuracy(point.speedAccuracyMps)
+                )
+            }
+
+            let exportAccelerationEvents = accelerationEvents.map { event in
+                ExportAccelerationEvent(
+                    eventId: event.eventId,
+                    timestamp: iso.string(from: event.timestamp),
+                    relativeSeconds: max(0, event.timestamp.timeIntervalSince(driveStartTime)),
+                    eventType: event.eventType,
+                    latitude: event.latitude,
+                    longitude: event.longitude,
+                    gForceMagnitude: event.gForceMagnitude,
+                    longitudinalG: event.longitudinalG,
+                    lateralG: event.lateralG,
+                    gpsSpeedMps: event.gpsSpeedMps,
+                    gpsSpeedMph: event.gpsSpeedMph,
+                    gpsSpeedDeltaMps: event.gpsSpeedDeltaMps,
+                    gpsCorroborated: event.gpsCorroborated,
+                    durationSeconds: event.durationSeconds,
+                    headingDeg: event.headingDeg
+                )
+            }
+
+            var categoryCounts: [String: Int] = [:]
+            var eventTypeCounts: [String: Int] = [:]
+            for event in timeline {
+                categoryCounts[event.category, default: 0] += 1
+                eventTypeCounts[event.eventType, default: 0] += 1
+            }
+
+            let bundle = JSONDriveExportBundle(
+                schemaVersion: 1,
+                generatedAt: iso.string(from: Date()),
+                exportSource: "drive_inspector",
+                drive: ExportDriveContext(
+                    driveId: driveId,
+                    driveShortId: driveShortId,
+                    startTime: iso.string(from: driveStartTime),
+                    endTime: driveEndTime.map { iso.string(from: $0) },
+                    isActive: isActive,
+                    startReason: startReason,
+                    endReason: endReason,
+                    iosVersion: iosVersion,
+                    deviceModel: deviceModel,
+                    appVersion: appVersion,
+                    lowPowerModeAtStart: lowPowerModeAtStart,
+                    batteryLevelAtStart: batteryLevelAtStart,
+                    batteryLevelAtEnd: batteryLevelAtEnd
+                ),
+                summary: ExportDriveSummary(
+                    durationSeconds: durationSeconds,
+                    distanceMeters: distanceMeters,
+                    distanceMiles: distanceMiles,
+                    averageSpeedMph: averageSpeedMph,
+                    maxSpeedMph: maxSpeedMph,
+                    detectionLatencySeconds: detectionLatencySeconds,
+                    confirmationLatencySeconds: confirmationLatencySeconds,
+                    locationSampleCount: locationSampleCount,
+                    droppedSampleCount: droppedSampleCount,
+                    locationPauseCount: locationPauseCount,
+                    maxGapSeconds: maxGapSeconds,
+                    distanceGapSkipCount: distanceGapSkipCount,
+                    distanceGapSkippedMeters: distanceGapSkippedMeters,
+                    bufferedPointCount: bufferedPointCount
+                ),
+                timeline: timeline,
+                routePoints: exportRoutePoints,
+                accelerationEvents: exportAccelerationEvents,
+                diagnostics: ExportDiagnostics(
+                    timelineEventCount: timeline.count,
+                    routePointCount: exportRoutePoints.count,
+                    accelerationEventCount: exportAccelerationEvents.count,
+                    categoryCounts: categoryCounts,
+                    eventTypeCounts: eventTypeCounts
+                )
+            )
+
+            guard let data = try? encoder.encode(bundle),
+                  let json = String(data: data, encoding: .utf8) else {
+                return "{}"
+            }
+            return json
+        }.value
+    }
+
+    private static func buildTimelineEvent(
+        entry: (
+            index: Int,
+            seq: Int,
+            eventId: String,
+            timestamp: Date,
+            category: String,
+            eventType: String,
+            message: String,
+            metadata: [String: String]
+        ),
+        driveId: String,
+        driveShortId: String,
+        driveStartTime: Date,
+        iso: ISO8601DateFormatter
+    ) -> JSONLTimelineEvent {
+        let meta = entry.metadata
+        let seq = entry.seq > 0 ? entry.seq : entry.index
+        let reasonCode = firstValue(
+            for: ["reason_code", "reason", "rule", "input_startReason", "input_endReason"],
+            in: meta
+        ) ?? entry.eventType
+
+        return JSONLTimelineEvent(
+            schemaVersion: 1,
+            driveId: driveId,
+            driveShortId: driveShortId,
+            seq: seq,
+            eventId: entry.eventId,
+            timestamp: iso.string(from: entry.timestamp),
+            relativeSeconds: max(0, entry.timestamp.timeIntervalSince(driveStartTime)),
+            category: entry.category,
+            eventType: entry.eventType,
+            message: entry.message,
+            reasonCode: reasonCode,
+            stateFrom: firstValue(for: ["state_from", "fromState", "input_fromState"], in: meta),
+            stateTo: firstValue(for: ["state_to", "toState", "input_toState"], in: meta),
+            trigger: firstValue(for: ["trigger", "input_trigger"], in: meta),
+            appState: firstValue(for: ["app_state", "appState", "state", "input_appState"], in: meta),
+            accM: firstDouble(for: ["acc_m", "accuracyM", "accuracy"], in: meta),
+            speedMph: firstDouble(for: ["speed_mph", "speedMPH", "speed", "input_speed"], in: meta),
+            locAgeS: firstDouble(for: ["loc_age_s", "ageSeconds", "age"], in: meta),
+            gapS: firstDouble(for: ["gap_s", "gapSeconds"], in: meta),
+            metadata: meta
+        )
     }
 
     private static func firstValue(for keys: [String], in metadata: [String: String]) -> String? {
@@ -588,6 +997,11 @@ struct DriveInspectorView: View {
             }
         }
         return nil
+    }
+
+    private static func sanitizedAccuracy(_ value: Double?) -> Double? {
+        guard let value else { return nil }
+        return value >= 0 ? value : nil
     }
     
     // MARK: - Helpers

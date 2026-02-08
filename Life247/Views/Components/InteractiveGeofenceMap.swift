@@ -13,6 +13,7 @@ import MapKit
 /// - Slider to resize radius
 /// - Shows live radius in meters
 struct InteractiveGeofenceMap: View {
+    @EnvironmentObject private var locationManager: LocationManager
     @Binding var coordinate: CLLocationCoordinate2D
     @Binding var radiusMeters: Double
     let icon: String
@@ -33,7 +34,10 @@ struct InteractiveGeofenceMap: View {
         self.icon = icon
         
         // Initialize camera centered on coordinate with appropriate zoom
-        let spanDegrees = (radiusMeters.wrappedValue * 4) / 111_320.0
+        let minRadius = 20.0
+        let maxRadius = 500.0
+        let initialRadius = min(max(radiusMeters.wrappedValue, minRadius), maxRadius)
+        let spanDegrees = (initialRadius * 4) / 111_320.0
         self._cameraPosition = State(initialValue: .region(MKCoordinateRegion(
             center: coordinate.wrappedValue,
             span: MKCoordinateSpan(latitudeDelta: max(spanDegrees, 0.002), longitudeDelta: max(spanDegrees, 0.002))
@@ -57,9 +61,8 @@ struct InteractiveGeofenceMap: View {
         ZStack {
             MapReader { proxy in
                 Map(position: $cameraPosition, interactionModes: [.pan, .zoom]) {
-                    // Geofence circle (geographically accurate)
-                    MapCircle(center: coordinate, radius: radiusMeters)
-                        .foregroundStyle(.blue.opacity(0.2))
+                    // Geofence ring (no fill) to avoid MapCircle fill artifacts.
+                    MapPolyline(coordinates: geofenceRingCoordinates(center: coordinate, radiusMeters: clampedRadiusMeters))
                         .stroke(.blue, lineWidth: 3)
                     
                     // Center marker
@@ -76,6 +79,11 @@ struct InteractiveGeofenceMap: View {
                     }
                 }
                 .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .including([.store, .restaurant, .gasStation])))
+                .onAppear {
+                    if radiusMeters != clampedRadiusMeters {
+                        radiusMeters = clampedRadiusMeters
+                    }
+                }
                 .onTapGesture { location in
                     handleTap(at: location, proxy: proxy)
                 }
@@ -97,23 +105,29 @@ struct InteractiveGeofenceMap: View {
     // MARK: - Radius Slider
     
     private var radiusSlider: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            
-            Slider(
-                value: $radiusMeters,
-                in: minRadius...maxRadius,
-                step: 10
-            )
-            .tint(.blue)
-            .onChange(of: radiusMeters) { _, newValue in
-                updateCameraForRadius(newValue)
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                Slider(
+                    value: $radiusMeters,
+                    in: minRadius...maxRadius,
+                    step: 10
+                )
+                .tint(.blue)
+                .onChange(of: radiusMeters) { _, newValue in
+                    updateCameraForRadius(newValue)
+                }
+                
+                Image(systemName: "circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             
-            Image(systemName: "circle.fill")
-                .font(.caption)
+            Text("Monitoring may trigger slightly outside this radius for reliability.")
+                .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
@@ -127,14 +141,22 @@ struct InteractiveGeofenceMap: View {
     // MARK: - Overlays
     
     private var radiusLabel: some View {
-        Text("\(Int(radiusMeters))m")
-            .font(.subheadline)
-            .fontWeight(.semibold)
-            .monospacedDigit()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.ultraThinMaterial)
-            .clipShape(Capsule())
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(Int(clampedRadiusMeters))m")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+            if displayMonitoringRadiusMeters > clampedRadiusMeters + 0.5 {
+                Text("Monitors at ~\(Int(displayMonitoringRadiusMeters))m")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
     }
     
     private var hintLabel: some View {
@@ -155,7 +177,7 @@ struct InteractiveGeofenceMap: View {
         withAnimation(.spring(response: 0.4)) {
             coordinate = tappedCoord
             // Recenter camera on new position
-            let spanDegrees = (radiusMeters * 4) / 111_320.0
+            let spanDegrees = (clampedRadiusMeters * 4) / 111_320.0
             cameraPosition = .region(MKCoordinateRegion(
                 center: tappedCoord,
                 span: MKCoordinateSpan(latitudeDelta: max(spanDegrees, 0.002), longitudeDelta: max(spanDegrees, 0.002))
@@ -165,13 +187,48 @@ struct InteractiveGeofenceMap: View {
     
     private func updateCameraForRadius(_ radius: Double) {
         // Adjust zoom to keep the circle nicely framed
-        let spanDegrees = (radius * 4) / 111_320.0
+        let clampedRadius = min(max(radius, minRadius), maxRadius)
+        let spanDegrees = (clampedRadius * 4) / 111_320.0
         withAnimation(.easeInOut(duration: 0.3)) {
             cameraPosition = .region(MKCoordinateRegion(
                 center: coordinate,
                 span: MKCoordinateSpan(latitudeDelta: max(spanDegrees, 0.002), longitudeDelta: max(spanDegrees, 0.002))
             ))
         }
+    }
+
+    private var clampedRadiusMeters: Double {
+        min(max(radiusMeters, minRadius), maxRadius)
+    }
+
+    private var displayMonitoringRadiusMeters: Double {
+        return LocationManager.recommendedMonitoringRadius(
+            forUserRadiusMeters: clampedRadiusMeters,
+            horizontalAccuracy: locationManager.currentHorizontalAccuracy
+        )
+    }
+
+    private func geofenceRingCoordinates(
+        center: CLLocationCoordinate2D,
+        radiusMeters: CLLocationDistance,
+        segments: Int = 180
+    ) -> [CLLocationCoordinate2D] {
+        let clampedSegments = max(72, min(360, segments))
+        let centerPoint = MKMapPoint(center)
+        let pointsPerMeter = MKMapPointsPerMeterAtLatitude(center.latitude)
+        let mapRadius = radiusMeters * pointsPerMeter
+
+        var coordinates: [CLLocationCoordinate2D] = []
+        coordinates.reserveCapacity(clampedSegments + 1)
+
+        for index in 0...clampedSegments {
+            let theta = (Double(index) / Double(clampedSegments)) * 2.0 * .pi
+            let x = centerPoint.x + (mapRadius * cos(theta))
+            let y = centerPoint.y + (mapRadius * sin(theta))
+            coordinates.append(MKMapPoint(x: x, y: y).coordinate)
+        }
+
+        return coordinates
     }
 }
 
@@ -189,6 +246,7 @@ struct InteractiveGeofenceMap: View {
                     radiusMeters: $radius,
                     icon: "cart.fill"
                 )
+                .environmentObject(LocationManager())
                 .frame(height: 300)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding()

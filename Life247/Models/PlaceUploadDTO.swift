@@ -23,7 +23,7 @@ struct PlaceUploadDTO: Codable {
         self.name = place.name
         self.latitude = place.latitude
         self.longitude = place.longitude
-        self.radiusMeters = place.radiusMeters
+        self.radiusMeters = place.clampedRadiusMeters
         self.icon = place.icon
     }
 }

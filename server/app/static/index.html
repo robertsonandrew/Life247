@@ -8,1069 +8,1323 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            /* Nord Theme Palette */
-            --nord0: #2e3440;
-            --nord1: #3b4252;
-            --nord2: #434c5e;
-            --nord3: #4c566a;
-            --nord4: #d8dee9;
-            --nord5: #e5e9f0;
-            --nord6: #eceff4;
-            --nord7: #8fbcbb;
-            --nord8: #88c0d0;
-            --nord9: #81a1c1;
-            --nord10: #5e81ac;
-            --nord11: #bf616a;
-            --nord12: #d08770;
-            --nord13: #ebcb8b;
-            --nord14: #a3be8c;
-            --nord15: #b48ead;
+            /* VS Code Dark+ palette */
+            --bg-base: #1e1e1e;
+            --bg-surface: #252526;
+            --bg-elevated: #2d2d30;
+            --bg-input: #3c3c3c;
+            --bg-hover: #2a2d2e;
+            --bg-active: #37373d;
+            --bg-highlight: #264f78;
 
-            /* Functional Variables */
-            --bg-color: var(--nord0);
-            --sidebar-bg: var(--nord1);
-            --card-bg: var(--nord1);
-            --card-border: var(--nord2);
-            --text-primary: var(--nord6);
-            --text-secondary: var(--nord4);
-            --accent: var(--nord8);
-            --hover-bg: var(--nord2);
+            --border-default: #3c3c3c;
+            --border-subtle: #2d2d30;
+            --border-focus: #007acc;
 
-            --sidebar-width: 280px;
-            --radius: 16px;
+            --text-primary: #d4d4d4;
+            --text-secondary: #cccccc;
+            --text-muted: #858585;
+            --text-disabled: #5a5a5a;
+
+            --accent-blue: #569cd6;
+            --accent-lightblue: #4fc1ff;
+            --accent-teal: #4ec9b0;
+            --accent-green: #6a9955;
+            --accent-yellow: #dcdcaa;
+            --accent-orange: #ce9178;
+            --accent-red: #f44747;
+            --accent-purple: #c586c0;
+            --accent-focus: #007acc;
+
+            --radius-lg: 8px;
+            --radius-sm: 4px;
+            --radius-md: 6px;
             --gap: 16px;
-            --font-stack: 'Inter', -apple-system, blinkmacsystemfont, sans-serif;
+            --sidebar-width: 240px;
+            --font-main: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
         }
 
-        * {
-            box-sizing: border-box;
-            outline: none;
-        }
+        * { box-sizing: border-box; }
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            font-family: var(--font-stack);
+        html, body {
             margin: 0;
-            display: flex;
-            min-height: 100vh;
+            min-height: 100%;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            scroll-behavior: smooth;
+            -webkit-font-smoothing: antialiased;
         }
 
-        /* Sidebar Styles */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(121,121,121,0.4); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(121,121,121,0.6); }
+
+        .app-shell { display: flex; min-height: 100vh; }
+
+        /* Sidebar */
         .sidebar {
             width: var(--sidebar-width);
-            background: rgba(59, 66, 82, 0.8);
-            backdrop-filter: blur(12px);
-            border-right: 1px solid var(--card-border);
-            display: flex;
-            flex-direction: column;
+            border-right: 1px solid var(--border-default);
+            background: var(--bg-surface);
             position: fixed;
             height: 100vh;
-            padding: 32px 20px;
-            z-index: 100;
-        }
-
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--nord6);
-            margin-bottom: 48px;
-            padding: 0 12px;
-        }
-
-        .brand-icon {
-            width: 32px;
-            height: 32px;
-            background: var(--nord8);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 12px rgba(136, 192, 208, 0.3);
-        }
-
-        .nav-section {
-            margin-bottom: 32px;
-        }
-
-        .nav-label {
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--nord3);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 12px;
-            padding: 0 12px;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            border-radius: 10px;
-            color: var(--nord4);
-            text-decoration: none;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-            cursor: pointer;
-            margin-bottom: 4px;
-        }
-
-        .nav-item:hover,
-        .nav-item.active {
-            background: var(--hover-bg);
-            color: var(--nord6);
-        }
-
-        .nav-item svg {
-            width: 18px;
-            height: 18px;
-            opacity: 0.7;
-        }
-
-        .nav-item.active svg {
-            opacity: 1;
-            color: var(--nord8);
-        }
-
-        .sidebar-footer {
-            margin-top: auto;
-            padding: 20px;
-            background: var(--nord2);
-            border-radius: var(--radius);
+            padding: 16px 12px;
             display: flex;
             flex-direction: column;
             gap: 12px;
+            z-index: 10;
         }
 
-        .status-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 12px;
+        .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
+        .brand-badge {
+            width: 28px; height: 28px; border-radius: 6px;
+            display: grid; place-items: center;
+            background: var(--accent-focus); color: #fff;
+            font-weight: 700; font-size: 14px;
+        }
+        .brand h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+
+        .sidebar-copy { font-size: 11px; color: var(--text-muted); padding: 0 8px; line-height: 1.5; }
+
+        .sidebar-nav { margin-top: 4px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+        .nav-link {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 8px; font-size: 13px; color: var(--text-secondary);
+            text-decoration: none; border: none; border-radius: var(--radius-sm);
+            padding: 6px 10px; background: transparent;
+            transition: background 0.12s ease, color 0.12s ease;
+        }
+        .nav-link:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .nav-link.active { background: var(--bg-active); color: #fff; }
+        .nav-link.active::before {
+            content: ''; width: 2px; height: 16px;
+            background: var(--accent-focus); border-radius: 1px; margin-right: 4px;
         }
 
-        .status-label {
-            color: var(--nord4);
-            opacity: 0.7;
+        .nav-kicker { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+        .sidebar-insights {
+            background: var(--bg-elevated); border: 1px solid var(--border-default);
+            border-radius: var(--radius-md); padding: 10px 12px;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .sidebar-section-label {
+            font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+            color: var(--text-muted); font-weight: 600;
+        }
+        .insight-row {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 8px; font-size: 12px; color: var(--text-secondary);
+        }
+        .insight-value {
+            font-family: var(--font-mono); color: var(--accent-lightblue);
+            text-align: right; min-width: 56px; font-size: 11px;
         }
 
+        .sidebar-status {
+            margin-top: auto; background: var(--bg-elevated);
+            border: 1px solid var(--border-default); border-radius: var(--radius-md);
+            padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+        }
+        .status-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+        .status-label { color: var(--text-muted); }
         .status-value {
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+            display: flex; align-items: center; gap: 6px;
+            font-family: var(--font-mono); color: var(--text-secondary); font-size: 11px;
         }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); }
+        .status-dot.warn { background: var(--accent-yellow); }
+        .status-dot.error { background: var(--accent-red); }
 
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--nord14);
-        }
-
-        /* Main Content */
-        .main-content {
+        /* Main */
+        .main {
             margin-left: var(--sidebar-width);
-            flex: 1;
-            padding: 40px;
-            max-width: 1600px;
+            width: calc(100% - var(--sidebar-width));
+            padding: 20px 24px; max-width: 1800px;
         }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 40px;
+        .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 12px; margin-bottom: 16px; padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-default);
         }
-
-        .header-title h1 {
-            margin: 0;
-            font-size: 28px;
-            font-weight: 700;
-        }
-
-        .header-title p {
-            margin: 4px 0 0;
-            color: var(--nord3);
-            font-size: 14px;
-        }
-
-        .header-actions {
-            display: flex;
-            gap: 12px;
-        }
+        .topbar h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.3px; }
+        .topbar p { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; }
 
         .btn {
-            padding: 10px 20px;
-            border-radius: 10px;
-            border: 1px solid var(--card-border);
-            background: var(--nord1);
-            color: var(--nord6);
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            border: 1px solid var(--border-default); background: var(--bg-elevated);
+            color: var(--text-primary); padding: 6px 12px; border-radius: var(--radius-sm);
+            cursor: pointer; font-size: 12px; font-family: var(--font-main);
+            transition: background 0.12s ease, border-color 0.12s ease;
+        }
+        .btn:hover { border-color: var(--text-muted); background: var(--bg-input); }
+        .btn.active {
+            background: var(--accent-focus); color: #fff;
+            border-color: var(--accent-focus); font-weight: 500;
         }
 
-        .btn:hover {
-            background: var(--nord2);
-            border-color: var(--nord3);
+        /* Filters */
+        .filter-row {
+            background: var(--bg-surface); border: 1px solid var(--border-default);
+            border-radius: var(--radius-md); padding: 12px 14px;
+            display: flex; flex-wrap: wrap; gap: 16px;
+            align-items: flex-end; margin-bottom: 16px;
         }
-
-        .btn-primary {
-            background: var(--nord8);
-            color: var(--nord0);
-            border: none;
+        .filter-label {
+            font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+            color: var(--text-muted); margin-bottom: 4px; font-weight: 600;
         }
-
-        .btn-primary:hover {
-            background: var(--nord7);
+        .preset-group, .select-group, .toggle-group {
+            display: flex; flex-direction: column; gap: 4px;
         }
-
-        /* Bento Grid */
-        .bento-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            grid-auto-rows: minmax(160px, auto);
-            gap: var(--gap);
-            margin-bottom: 48px;
+        .preset-buttons, .metric-buttons { display: inline-flex; gap: 4px; }
+        select {
+            border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+            background: var(--bg-input); color: var(--text-primary);
+            padding: 6px 10px; font-family: var(--font-main);
+            font-size: 12px; min-width: 170px; outline: none;
         }
+        select:focus { border-color: var(--accent-focus); }
 
+        /* KPI grid */
+        .kpi-grid {
+            display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr));
+            gap: 12px; margin-bottom: 16px;
+        }
         .card {
-            background: rgba(59, 66, 82, 0.6);
-            backdrop-filter: blur(8px);
-            border: 1px solid var(--card-border);
-            border-radius: var(--radius);
-            padding: 24px;
-            display: flex;
-            flex-direction: column;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: var(--bg-surface); border: 1px solid var(--border-default);
+            border-radius: var(--radius-md); padding: 14px;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .kpi-label {
+            color: var(--text-muted); font-size: 10px; text-transform: uppercase;
+            letter-spacing: 0.05em; font-weight: 600;
+        }
+        .kpi-value {
+            font-size: 22px; font-weight: 700; line-height: 1;
+            color: var(--text-primary); font-family: var(--font-mono);
+        }
+        .kpi-sub { font-size: 11px; color: var(--text-muted); }
+
+        /* Layout grid */
+        .layout-grid {
+            display: grid; grid-template-columns: minmax(600px, 1.5fr) minmax(380px, 1fr);
+            gap: 12px; margin-bottom: 16px; align-items: stretch;
+        }
+        .layout-grid-habits { align-items: start; }
+        .panel-title {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 10px; margin-bottom: 8px;
+        }
+        .panel-title h3 { margin: 0; font-size: 13px; font-weight: 600; }
+        .panel-copy { font-size: 11px; color: var(--text-muted); }
+        .chart-wrap { height: 220px; }
+
+        /* Heatmap */
+        .habit-grid-wrap { overflow-x: auto; padding-top: 4px; }
+        .habit-grid {
+            display: grid; grid-template-columns: repeat(24, minmax(16px, 1fr));
+            grid-auto-rows: 18px; gap: 3px; width: 100%;
+            min-width: 500px; margin-top: 6px;
+        }
+        .habit-cell { border-radius: 2px; background: var(--bg-input); }
+        .habit-axis {
+            display: flex; justify-content: space-between;
+            color: var(--text-muted); font-size: 10px;
+            margin-top: 6px; font-family: var(--font-mono);
+        }
+        .habit-legend {
+            margin-top: 8px; display: flex; align-items: center;
+            gap: 4px; font-size: 10px; color: var(--text-muted);
+        }
+        .legend-chip { width: 12px; height: 12px; border-radius: 2px; }
+
+        /* Behavior */
+        .behavior-layout {
+            display: grid; grid-template-columns: minmax(200px, 0.9fr) minmax(200px, 1fr);
+            gap: 14px; align-items: start;
+        }
+        .behavior-chart-wrap { height: 200px; min-width: 200px; position: relative; }
+        #behavior-chart { width: 100% !important; height: 100% !important; }
+        .mini-kv {
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 12px; border-bottom: 1px solid var(--border-default);
+            padding: 5px 0; color: var(--text-secondary);
+        }
+        .mini-kv:last-child { border-bottom: 0; }
+        .mini-kv strong { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); }
+
+        /* Places */
+        .places-list {
+            display: flex; flex-direction: column; gap: 6px; flex: 1;
+            min-height: 200px; max-height: 400px; overflow: auto; padding-right: 2px;
+        }
+        .place-row {
+            display: grid; grid-template-columns: 1fr auto; gap: 8px;
+            align-items: center; border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm); padding: 8px 10px;
+            background: var(--bg-elevated); transition: background 0.12s ease;
+        }
+        .place-row:hover { background: var(--bg-hover); }
+        .place-title { font-size: 13px; margin: 0; font-weight: 500; }
+        .place-sub { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; }
+
+        /* Journey cards */
+        .journey-header {
+            display: flex; justify-content: space-between; align-items: center; margin: 12px 0;
+        }
+        .journey-header h3 { font-size: 14px; font-weight: 600; margin: 0; }
+        .journey-list {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px;
+        }
+        .journey-card {
+            border: 1px solid var(--border-default); background: var(--bg-surface);
+            border-radius: var(--radius-md); cursor: pointer;
+            transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+            overflow: hidden; display: flex; flex-direction: column;
+        }
+        .journey-card:hover {
+            transform: translateY(-1px); border-color: var(--accent-focus);
+            background: var(--bg-elevated);
         }
 
-        .card:hover {
-            border-color: var(--nord8);
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(136, 192, 208, 0.1);
+        .journey-minimap {
+            width: 100%; height: 130px; background: var(--bg-base);
+            position: relative; border-bottom: 1px solid var(--border-default);
+        }
+        .journey-minimap .leaflet-container { background: var(--bg-base) !important; }
+        .journey-no-map {
+            width: 100%; height: 130px; background: var(--bg-elevated);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--text-disabled); font-size: 12px;
+            border-bottom: 1px solid var(--border-default);
+        }
+        .journey-content { padding: 12px 14px; }
+        .journey-head {
+            display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+        }
+        .journey-time { font-size: 13px; font-weight: 600; }
+        .journey-sub {
+            color: var(--text-muted); font-size: 11px; margin-top: 2px;
+            font-family: var(--font-mono);
         }
 
-        .col-span-1 {
-            grid-column: span 1;
+        .badge { border-radius: 3px; font-size: 10px; font-weight: 600; padding: 2px 6px; font-family: var(--font-mono); }
+        .badge-clean {
+            background: rgba(78,201,176,0.15); color: var(--accent-teal);
+            border: 1px solid rgba(78,201,176,0.3);
+        }
+        .badge-warn {
+            background: rgba(206,145,120,0.15); color: var(--accent-orange);
+            border: 1px solid rgba(206,145,120,0.3);
+        }
+        .badge-danger {
+            background: rgba(244,71,71,0.15); color: var(--accent-red);
+            border: 1px solid rgba(244,71,71,0.3);
         }
 
-        .col-span-2 {
-            grid-column: span 2;
+        .journey-stats {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px;
         }
-
-        .col-span-3 {
-            grid-column: span 3;
+        .journey-stat {
+            background: var(--bg-elevated); border-radius: var(--radius-sm);
+            padding: 6px; text-align: center;
         }
-
-        .col-span-full {
-            grid-column: 1 / -1;
+        .journey-stat strong {
+            display: block; font-size: 13px; font-family: var(--font-mono); color: var(--text-primary);
         }
-
-        .row-span-2 {
-            grid-row: span 2;
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 16px;
-        }
-
-        .card-title {
-            font-size: 12px;
-            font-weight: 700;
-            color: var(--nord3);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .card-icon {
-            color: var(--nord8);
-            opacity: 0.8;
-        }
-
-        .card-value {
-            font-size: 32px;
-            font-weight: 700;
-            margin-top: auto;
-        }
-
-        .card-subtext {
-            font-size: 12px;
-            color: var(--nord14);
-            margin-top: 8px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .chart-container {
-            flex: 1;
-            min-height: 0;
-            position: relative;
-        }
-
-        /* Drive List */
-        .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-        }
-
-        .section-header h2 {
-            margin: 0;
-            font-size: 20px;
-        }
-
-        .drive-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-            gap: var(--gap);
-        }
-
-        .drive-card {
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: var(--radius);
-            overflow: hidden;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .drive-card:hover {
-            transform: translateY(-4px);
-            border-color: var(--nord8);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }
-
-        .drive-map {
-            height: 160px;
-            background: var(--nord0);
-            position: relative;
-        }
-
-        .drive-info {
-            padding: 20px;
-        }
-
-        .drive-time {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .drive-meta {
-            display: flex;
-            gap: 12px;
-            font-size: 12px;
-            color: var(--nord4);
-            opacity: 0.7;
-        }
-
-        .drive-stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid var(--card-border);
-        }
-
-        .stat-item {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .stat-val {
-            font-weight: 700;
-            font-size: 14px;
-        }
-
-        .stat-lbl {
-            font-size: 10px;
-            color: var(--nord3);
-            text-transform: uppercase;
-        }
-
-        .tag {
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 10px;
-            font-weight: 700;
-            background: var(--nord2);
-            color: var(--nord4);
-        }
+        .journey-stat span { font-size: 10px; color: var(--text-muted); }
+        .journey-footer { margin-top: 8px; font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+        .load-more-wrap { margin-top: 16px; display: flex; justify-content: center; }
+        .empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px; }
 
         /* Modal */
         .modal {
-            position: fixed;
-            inset: 0;
-            background: rgba(46, 52, 64, 0.8);
-            backdrop-filter: blur(8px);
-            z-index: 1000;
-            display: none;
-            justify-content: center;
-            align-items: center;
+            position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+            backdrop-filter: blur(4px); display: none;
+            align-items: center; justify-content: center; z-index: 100; padding: 20px;
+        }
+        .modal-shell {
+            width: min(1200px, 96vw); max-height: 90vh; overflow: hidden;
+            background: var(--bg-surface); border: 1px solid var(--border-default);
+            border-radius: var(--radius-lg); display: flex; flex-direction: column;
+            box-shadow: 0 16px 64px rgba(0,0,0,0.5);
+        }
+        .modal-head {
+            padding: 10px 16px; border-bottom: 1px solid var(--border-default);
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 12px; background: var(--bg-elevated);
+        }
+        .modal-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+        .modal-body {
+            display: grid; grid-template-columns: 1.4fr 1fr;
+            min-height: 560px; overflow: hidden;
+        }
+        #drive-map { min-height: 400px; }
+        .detail-column {
+            overflow: auto; border-left: 1px solid var(--border-default);
+            padding: 14px; display: flex; flex-direction: column; gap: 10px;
+            background: var(--bg-surface);
+        }
+        .detail-card {
+            border: 1px solid var(--border-default); border-radius: var(--radius-md);
+            background: var(--bg-elevated); padding: 12px;
+        }
+        .detail-card h4 {
+            margin: 0 0 8px; font-size: 12px; color: var(--accent-lightblue);
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        .quality-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .quality-item { background: var(--bg-input); border-radius: var(--radius-sm); padding: 8px; }
+        .quality-item .q-label { color: var(--text-muted); font-size: 10px; }
+        .quality-item .q-val { font-size: 13px; font-weight: 600; margin-top: 2px; font-family: var(--font-mono); }
+
+        .timeline-log {
+            display: none; max-height: 180px; overflow: auto;
+            border-top: 1px solid var(--border-default);
+            margin-top: 8px; padding-top: 8px; font-size: 12px;
+        }
+        .timeline-log.open { display: block; }
+        .timeline-row { padding: 4px 0; border-bottom: 1px solid var(--border-subtle); font-size: 11px; }
+        .timeline-row:last-child { border-bottom: 0; }
+        .mono { font-family: var(--font-mono); color: var(--text-secondary); }
+
+        /* Auth */
+        .auth-box {
+            width: min(400px, 96vw); background: var(--bg-surface);
+            border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+            padding: 24px; box-shadow: 0 16px 64px rgba(0,0,0,0.5);
+        }
+        .auth-box h3 { margin: 0 0 8px; font-size: 16px; }
+        .auth-box p { margin: 0 0 16px; color: var(--text-muted); font-size: 12px; }
+        .auth-box input {
+            width: 100%; border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm); padding: 8px 12px;
+            margin-bottom: 12px; background: var(--bg-input);
+            color: var(--text-primary); font-family: var(--font-mono);
+            font-size: 13px; outline: none;
+        }
+        .auth-box input:focus { border-color: var(--accent-focus); }
+
+        /* Responsive */
+        @media (max-width: 1100px) {
+            .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+            .layout-grid { grid-template-columns: 1fr; }
+            .behavior-layout { grid-template-columns: 1fr; }
+            .behavior-chart-wrap { max-width: 280px; margin: 0 auto; width: 100%; }
+            .modal-body { grid-template-columns: 1fr; }
+            #drive-map { min-height: 320px; }
+            .detail-column { border-left: 0; border-top: 1px solid var(--border-default); }
+        }
+        @media (max-width: 860px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; width: 100%; padding: 12px; }
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+            .journey-stats { grid-template-columns: repeat(2, 1fr); }
+            .topbar { flex-direction: column; align-items: flex-start; }
+            .journey-list { grid-template-columns: 1fr; }
+            .habit-grid { min-width: 0; grid-template-columns: repeat(24, minmax(12px, 1fr)); grid-auto-rows: 14px; gap: 2px; }
         }
 
-        .modal-content {
-            background: var(--nord1);
-            border: 1px solid var(--card-border);
-            border-radius: 20px;
-            padding: 40px;
-            width: 100%;
-            max-width: 440px;
-            text-align: center;
-        }
-
-        .input-group {
-            margin: 24px 0;
-        }
-
-        input {
-            width: 100%;
-            padding: 14px;
-            background: var(--nord0);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            color: var(--nord6);
-            font-family: inherit;
-        }
-
-        /* Consistency Map */
-        .heatmap-grid {
-            display: grid;
-            grid-template-columns: repeat(52, 1fr);
-            grid-template-rows: repeat(7, 1fr);
-            gap: 3px;
-            aspect-ratio: 7 / 1;
-        }
-
-        .heatmap-cell {
-            background: var(--nord2);
-            border-radius: 2px;
-        }
-
-        .heatmap-cell[data-level="1"] {
-            background: #4c566a;
-        }
-
-        .heatmap-cell[data-level="2"] {
-            background: #81a1c1;
-        }
-
-        .heatmap-cell[data-level="3"] {
-            background: #88c0d0;
-        }
-
-        .heatmap-cell[data-level="4"] {
-            background: #8fbcbb;
-        }
-
-        @media (max-width: 1024px) {
-            .sidebar {
-                width: 80px;
-                padding: 20px 10px;
-            }
-
-            .brand span,
-            .nav-item span,
-            .nav-label,
-            .sidebar-footer {
-                display: none;
-            }
-
-            .main-content {
-                margin-left: 80px;
-            }
-
-            .bento-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
+        /* Leaflet overrides */
+        .leaflet-control-attribution { display: none !important; }
+        .leaflet-control-zoom a {
+            background: var(--bg-elevated) !important; color: var(--text-primary) !important;
+            border-color: var(--border-default) !important;
         }
     </style>
 </head>
 
 <body>
-
-    <div class="sidebar">
-        <div class="brand">
-            <div class="brand-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
-                    stroke-linejoin="round" style="width: 20px; height: 20px; color: var(--nord0);">
-                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
-                </svg>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-badge">L</div>
+                <h1>Life247 Hub</h1>
             </div>
-            <span>Life247</span>
-        </div>
+            <div class="sidebar-copy">Drive behavior, habits, and quality telemetry from your iOS tracker.</div>
 
-        <nav class="nav-section">
-            <div class="nav-label">Menu</div>
-            <a href="#" class="nav-item active">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <rect x="3" y="3" width="7" height="7"></rect>
-                    <rect x="14" y="3" width="7" height="7"></rect>
-                    <rect x="14" y="14" width="7" height="7"></rect>
-                    <rect x="3" y="14" width="7" height="7"></rect>
-                </svg>
-                <span>Dashboard</span>
-            </a>
-            <a href="#" class="nav-item">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                </svg>
-                <span>Analytics</span>
-            </a>
-            <a href="#" class="nav-item">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                    <circle cx="12" cy="10" r="3"></circle>
-                </svg>
-                <span>Places</span>
-            </a>
-            <a href="#" class="nav-item">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
-                    <line x1="12" y1="18" x2="12.01" y2="18"></line>
-                </svg>
-                <span>Devices</span>
-            </a>
-        </nav>
+            <nav class="sidebar-nav" id="sidebar-nav">
+                <a class="nav-link active" href="#section-overview" data-target="section-overview">
+                    <span>Overview</span>
+                    <span class="nav-kicker">KPIs</span>
+                </a>
+                <a class="nav-link" href="#section-activity" data-target="section-activity">
+                    <span>Activity + Behavior</span>
+                    <span class="nav-kicker">Trends</span>
+                </a>
+                <a class="nav-link" href="#section-habits" data-target="section-habits">
+                    <span>Habits + Places</span>
+                    <span class="nav-kicker">Patterns</span>
+                </a>
+                <a class="nav-link" href="#section-journeys" data-target="section-journeys">
+                    <span>Recent Journeys</span>
+                    <span class="nav-kicker">Trips</span>
+                </a>
+            </nav>
 
-        <div class="sidebar-footer">
-            <div class="status-row">
-                <span class="status-label">Server Status</span>
-                <span class="status-value">
-                    <div class="status-dot"></div>
-                    Online
-                </span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">API Version</span>
-                <span class="status-value">v2.4.0</span>
-            </div>
-        </div>
-    </div>
-
-    <div class="main-content">
-        <header>
-            <div class="header-title">
-                <h1>Hub Overview</h1>
-                <p id="time-range">Displaying data for the last 30 days</p>
-            </div>
-            <div class="header-actions">
-                <button class="btn" onclick="toggleMap()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" style="width: 16px;">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="2" y1="12" x2="22" y2="12"></line>
-                        <path
-                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
-                        </path>
-                    </svg>
-                    Global Map
-                </button>
-                <button class="btn btn-primary" onclick="loadData()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" style="width: 16px;">
-                        <polyline points="23 4 23 10 17 10"></polyline>
-                        <polyline points="1 20 1 14 7 14"></polyline>
-                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                    </svg>
-                    Refresh
-                </button>
-            </div>
-        </header>
-
-        <div class="bento-grid">
-            <!-- Stats -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Total Distance</span>
-                    <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        style="width: 16px;">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                        <circle cx="12" cy="10" r="3"></circle>
-                    </svg>
+            <div class="sidebar-insights">
+                <div class="sidebar-section-label">Quick Pulse</div>
+                <div class="insight-row">
+                    <span>Drives</span>
+                    <span class="insight-value" id="side-quick-drives">0</span>
                 </div>
-                <div class="card-value" id="stat-distance">0 mi</div>
-                <div class="card-subtext">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px;">
-                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                        <polyline points="17 6 23 6 23 12"></polyline>
-                    </svg>
-                    <span>12% from last month</span>
+                <div class="insight-row">
+                    <span>Event Rate</span>
+                    <span class="insight-value" id="side-quick-rate">0.0</span>
+                </div>
+                <div class="insight-row">
+                    <span>Top Place</span>
+                    <span class="insight-value" id="side-quick-place">n/a</span>
+                </div>
+                <div class="insight-row">
+                    <span>Device</span>
+                    <span class="insight-value" id="side-quick-device">all</span>
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Total Drives</span>
-                    <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        style="width: 16px;">
-                        <rect x="1" y="3" width="15" height="13"></rect>
-                        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
-                        <circle cx="5.5" cy="18.5" r="2.5"></circle>
-                        <circle cx="18.5" cy="18.5" r="2.5"></circle>
-                    </svg>
+            <div class="sidebar-status">
+                <div class="status-row">
+                    <span class="status-label">Sync</span>
+                    <span class="status-value"><span class="status-dot" id="sync-dot"></span><span id="sync-status">Ready</span></span>
                 </div>
-                <div class="card-value" id="stat-drives">0</div>
-                <div class="card-subtext">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 12px;">
-                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                        <polyline points="17 6 23 6 23 12"></polyline>
-                    </svg>
-                    <span>5 new today</span>
+                <div class="status-row">
+                    <span class="status-label">Range</span>
+                    <span class="status-value" id="status-range">30D</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Loaded</span>
+                    <span class="status-value" id="status-loaded">0 drives</span>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main">
+            <div class="topbar">
+                <div>
+                    <h2>Drive Intelligence</h2>
+                    <p>Analytics from server summaries with per-drive drill down</p>
+                </div>
+                <div>
+                    <button class="btn" id="refresh-btn">Refresh</button>
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Safety Score</span>
-                    <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        style="width: 16px;">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                    </svg>
-                </div>
-                <div class="card-value" id="stat-score">98</div>
-                <div class="card-subtext" style="color: var(--nord14);">
-                    Excellent driving behavior
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Avg. Duration</span>
-                    <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        style="width: 16px;">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <polyline points="12 6 12 12 16 14"></polyline>
-                    </svg>
-                </div>
-                <div class="card-value" id="stat-duration">0m</div>
-                <div class="card-subtext">
-                    Per trip average
-                </div>
-            </div>
-
-            <!-- Charts -->
-            <div class="card col-span-2 row-span-2">
-                <div class="card-header">
-                    <span class="card-title">Activity Trend</span>
-                </div>
-                <div class="chart-container">
-                    <canvas id="chart-activity"></canvas>
-                </div>
-            </div>
-
-            <div class="card col-span-2">
-                <div class="card-header">
-                    <span class="card-title">Consistency Map</span>
-                </div>
-                <div id="heatmap" class="heatmap-grid" style="margin-top: 10px;"></div>
-                <div
-                    style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 12px; font-size: 10px; color: var(--nord3);">
-                    <span>Less</span>
-                    <div style="width: 10px; height: 10px; background: var(--nord2); border-radius: 2px;"></div>
-                    <div style="width: 10px; height: 10px; background: #4c566a; border-radius: 2px;"></div>
-                    <div style="width: 10px; height: 10px; background: #81a1c1; border-radius: 2px;"></div>
-                    <div style="width: 10px; height: 10px; background: #88c0d0; border-radius: 2px;"></div>
-                    <div style="width: 10px; height: 10px; background: #8fbcbb; border-radius: 2px;"></div>
-                    <span>More</span>
-                </div>
-            </div>
-
-            <div class="card col-span-1">
-                <div class="card-header">
-                    <span class="card-title">Intent Distribution</span>
-                </div>
-                <div class="chart-container">
-                    <canvas id="chart-intent"></canvas>
-                </div>
-            </div>
-
-            <div class="card col-span-1">
-                <div class="card-header">
-                    <span class="card-title">Battery Impact</span>
-                </div>
-                <div class="card-value" style="font-size: 24px; color: var(--nord13);">1.2% <span
-                        style="font-size: 14px; font-weight: 500; color: var(--nord3);">/ hr</span></div>
-                <div style="margin-top: auto;">
-                    <div style="height: 4px; background: var(--nord2); border-radius: 2px; overflow: hidden;">
-                        <div style="width: 15%; height: 100%; background: var(--nord13);"></div>
+            <section class="filter-row">
+                <div class="preset-group">
+                    <div class="filter-label">Date Range</div>
+                    <div class="preset-buttons">
+                        <button class="btn preset-btn" data-preset="7d">7D</button>
+                        <button class="btn preset-btn active" data-preset="30d">30D</button>
+                        <button class="btn preset-btn" data-preset="90d">90D</button>
+                        <button class="btn preset-btn" data-preset="all">All</button>
                     </div>
-                    <p style="font-size: 11px; margin: 8px 0 0; color: var(--nord4); opacity: 0.6;">Avg. drain while
-                        driving</p>
+                </div>
+                <div class="select-group">
+                    <div class="filter-label">Device</div>
+                    <select id="device-filter">
+                        <option value="">All Devices</option>
+                    </select>
+                </div>
+                <div class="toggle-group">
+                    <div class="filter-label">Activity Metric</div>
+                    <div class="metric-buttons">
+                        <button class="btn metric-btn active" data-metric="distance">Distance</button>
+                        <button class="btn metric-btn" data-metric="drives">Drives</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="kpi-grid" id="section-overview">
+                <div class="card">
+                    <div class="kpi-label">Total Distance</div>
+                    <div class="kpi-value" id="kpi-distance">0 mi</div>
+                    <div class="kpi-sub" id="kpi-distance-sub">0 total hours</div>
+                </div>
+                <div class="card">
+                    <div class="kpi-label">Total Drives</div>
+                    <div class="kpi-value" id="kpi-drives">0</div>
+                    <div class="kpi-sub" id="kpi-micro">0 micro trips</div>
+                </div>
+                <div class="card">
+                    <div class="kpi-label">Avg Duration</div>
+                    <div class="kpi-value" id="kpi-duration">0m</div>
+                    <div class="kpi-sub" id="kpi-speed">0 mph avg</div>
+                </div>
+                <div class="card">
+                    <div class="kpi-label">Event Rate</div>
+                    <div class="kpi-value" id="kpi-event-rate">0</div>
+                    <div class="kpi-sub">events / 100 mi</div>
+                </div>
+                <div class="card">
+                    <div class="kpi-label">Detection Latency</div>
+                    <div class="kpi-value" id="kpi-detect">0 ms</div>
+                    <div class="kpi-sub" id="kpi-gap">p95 gap 0 ms</div>
+                </div>
+                <div class="card">
+                    <div class="kpi-label">Battery Drain</div>
+                    <div class="kpi-value" id="kpi-battery">0%</div>
+                    <div class="kpi-sub" id="kpi-streak">streak 0 days</div>
+                </div>
+            </section>
+
+            <section class="layout-grid" id="section-activity">
+                <div class="card">
+                    <div class="panel-title">
+                        <h3>Activity Trend</h3>
+                        <span class="panel-copy" id="activity-copy">distance by day</span>
+                    </div>
+                    <div class="chart-wrap"><canvas id="activity-chart"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="panel-title">
+                        <h3>Behavior</h3>
+                        <span class="panel-copy">events + safety load</span>
+                    </div>
+                    <div class="behavior-layout">
+                        <div class="behavior-chart-wrap">
+                            <canvas id="behavior-chart"></canvas>
+                        </div>
+                        <div>
+                            <div class="mini-kv"><span>Hard Brakes</span><strong id="metric-brake">0</strong></div>
+                            <div class="mini-kv"><span>Hard Accel</span><strong id="metric-accel">0</strong></div>
+                            <div class="mini-kv"><span>Hard Corner</span><strong id="metric-corner">0</strong></div>
+                            <div class="mini-kv"><span>Max G-Force</span><strong id="metric-gforce">0.00g</strong></div>
+                            <div class="mini-kv"><span>Drop Rate</span><strong id="metric-drop-rate">0%</strong></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="layout-grid layout-grid-habits" id="section-habits">
+                <div class="card">
+                    <div class="panel-title">
+                        <h3>7x24 Drive Habit Heatmap</h3>
+                        <span class="panel-copy">weekday vs hour-of-day</span>
+                    </div>
+                    <div class="habit-grid-wrap">
+                        <div class="habit-grid" id="habit-grid"></div>
+                    </div>
+                    <div class="habit-axis">
+                        <span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span>
+                    </div>
+                    <div class="habit-legend">
+                        <span>low</span>
+                        <span class="legend-chip" style="background:#3c3c3c;"></span>
+                        <span class="legend-chip" style="background:#264f78;"></span>
+                        <span class="legend-chip" style="background:#007acc;"></span>
+                        <span class="legend-chip" style="background:#569cd6;"></span>
+                        <span class="legend-chip" style="background:#4fc1ff;"></span>
+                        <span>high</span>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="panel-title">
+                        <h3>Places and Stops</h3>
+                        <span class="panel-copy">top dwell locations</span>
+                    </div>
+                    <div class="places-list" id="places-list"></div>
+                </div>
+            </section>
+
+            <section id="section-journeys">
+                <div class="journey-header">
+                    <h3>Recent Journeys</h3>
+                    <div>
+                        <select id="journey-sort">
+                            <option value="newest">Newest First</option>
+                            <option value="longest">Longest Distance</option>
+                            <option value="events">Most Events</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="journey-list" id="journey-list"></div>
+                <div class="load-more-wrap"><button class="btn" id="load-more-btn">Load More</button></div>
+            </section>
+        </main>
+    </div>
+
+    <div class="modal" id="auth-modal">
+        <div class="auth-box">
+            <h3>Enter API Key</h3>
+            <p>Dashboard requires X-API-Key authentication.</p>
+            <input type="password" id="api-key-input" placeholder="LIFE247 API key">
+            <button class="btn active" style="width:100%;" id="auth-submit">Open Dashboard</button>
+        </div>
+    </div>
+
+    <div class="modal" id="drive-modal">
+        <div class="modal-shell">
+            <div class="modal-head">
+                <h3 id="drive-modal-title">Drive Detail</h3>
+                <button class="btn" id="close-drive-modal">Close</button>
+            </div>
+            <div class="modal-body">
+                <div id="drive-map"></div>
+                <div class="detail-column">
+                    <div class="detail-card">
+                        <h4>Speed Profile</h4>
+                        <div style="height:160px;"><canvas id="speed-chart"></canvas></div>
+                    </div>
+                    <div class="detail-card">
+                        <h4>Quality Metrics</h4>
+                        <div class="quality-grid" id="quality-grid"></div>
+                    </div>
+                    <div class="detail-card">
+                        <h4>Drive Events</h4>
+                        <div class="mini-kv"><span>Total Events</span><strong id="detail-events-total">0</strong></div>
+                        <div class="mini-kv"><span>Hard Brakes</span><strong id="detail-events-brake">0</strong></div>
+                        <div class="mini-kv"><span>Hard Accel</span><strong id="detail-events-accel">0</strong></div>
+                        <div class="mini-kv"><span>Hard Corner</span><strong id="detail-events-corner">0</strong></div>
+                        <button class="btn" style="margin-top:8px; width:100%;" id="toggle-log-btn">Show Timeline Log</button>
+                        <div class="timeline-log" id="timeline-log"></div>
+                    </div>
                 </div>
             </div>
-        </div>
-
-        <div class="section-header">
-            <h2>Recent Journeys</h2>
-            <div style="display: flex; gap: 8px;">
-                <select class="btn" style="padding: 6px 12px;" id="sort-order" onchange="renderList()">
-                    <option value="newest">Newest First</option>
-                    <option value="longest">Longest Distance</option>
-                </select>
-            </div>
-        </div>
-
-        <div id="drive-list" class="drive-list">
-            <!-- Drives will be injected here -->
-        </div>
-
-        <div style="text-align: center; margin-top: 48px;">
-            <button class="btn" style="padding: 12px 32px;" onclick="loadMore()">Load More Records</button>
-        </div>
-    </div>
-
-    <!-- Auth Modal -->
-    <div class="modal" id="auth-modal">
-        <div class="modal-content">
-            <h2 style="margin-top: 0;">Welcome Back</h2>
-            <p style="color: var(--nord3); font-size: 14px;">Enter your API key to access your Life247 data.</p>
-            <div class="input-group">
-                <input type="password" id="api-key-input" placeholder="••••••••••••••••">
-            </div>
-            <button class="btn btn-primary" style="width: 100%; padding: 14px;" onclick="saveAuth()">Enter
-                Dashboard</button>
-        </div>
-    </div>
-
-    <!-- Map Modal -->
-    <div class="modal" id="map-modal">
-        <div class="modal-content"
-            style="max-width: 90%; width: 1200px; height: 80vh; padding: 0; overflow: hidden; display: flex; flex-direction: column;">
-            <div
-                style="padding: 20px; border-bottom: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center;">
-                <h3 id="map-modal-title" style="margin: 0;">Journey Map</h3>
-                <button class="btn" onclick="closeMap()">Close</button>
-            </div>
-            <div id="full-map" style="flex: 1;"></div>
         </div>
     </div>
 
     <script>
-        let apiKey = localStorage.getItem('life247_api_key');
-        let allDrives = [];
-        let displayLimit = 9;
+        const METERS_TO_MILES = 0.000621371;
         const mapStyle = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
 
-        document.addEventListener('DOMContentLoaded', () => {
-            if (!apiKey) {
-                document.getElementById('auth-modal').style.display = 'flex';
-            } else {
-                loadData();
-            }
-        });
-
-        function saveAuth() {
-            const val = document.getElementById('api-key-input').value;
-            if (val) {
-                apiKey = val;
-                localStorage.setItem('life247_api_key', apiKey);
-                document.getElementById('auth-modal').style.display = 'none';
-                loadData();
-            }
-        }
-
-        async function loadData() {
-            try {
-                const headers = { 'X-API-Key': apiKey };
-                const response = await fetch('/drives?limit=5000', { headers });
-
-                if (response.status === 401) {
-                    apiKey = null;
-                    document.getElementById('auth-modal').style.display = 'flex';
-                    return;
-                }
-
-                allDrives = await response.json();
-                processStats();
-                renderHeatmap();
-                renderCharts();
-                renderList();
-            } catch (err) {
-                console.error('Failed to load data:', err);
-            }
-        }
-
-        function processStats() {
-            const totalMeters = allDrives.reduce((s, d) => s + (d.distanceMeters || 0), 0);
-            const totalMiles = (totalMeters * 0.000621371).toFixed(0);
-            const totalDrives = allDrives.length;
-            const avgSeconds = allDrives.reduce((s, d) => s + (d.durationSeconds || 0), 0) / (totalDrives || 1);
-
-            document.getElementById('stat-distance').innerText = `${parseInt(totalMiles).toLocaleString()} mi`;
-            document.getElementById('stat-drives').innerText = totalDrives.toLocaleString();
-            document.getElementById('stat-duration').innerText = `${Math.round(avgSeconds / 60)}m`;
-        }
-
-        function renderHeatmap() {
-            const container = document.getElementById('heatmap');
-            container.innerHTML = '';
-
-            // Map drives to dates
-            const counts = {};
-            allDrives.forEach(d => {
-                const date = new Date(d.startTime).toISOString().split('T')[0];
-                counts[date] = (counts[date] || 0) + 1;
-            });
-
-            // last 364 days
-            const today = new Date();
-            for (let i = 363; i >= 0; i--) {
-                const d = new Date(today);
-                d.setDate(d.getDate() - i);
-                const ds = d.toISOString().split('T')[0];
-                const count = counts[ds] || 0;
-
-                const cell = document.createElement('div');
-                cell.className = 'heatmap-cell';
-                if (count > 0) {
-                    const level = Math.min(Math.ceil(count / 2), 4);
-                    cell.dataset.level = level;
-                    cell.title = `${ds}: ${count} drives`;
-                }
-                container.appendChild(cell);
-            }
-        }
+        let apiKey = localStorage.getItem('life247_api_key');
+        let selectedPreset = '30d';
+        let selectedDeviceId = '';
+        let selectedActivityMetric = 'distance';
 
         let activityChart = null;
-        let intentChart = null;
+        let behaviorChart = null;
+        let speedChart = null;
+        let detailMap = null;
 
-        function renderCharts() {
-            // Activity Chart (Last 7 Days)
-            const activityCtx = document.getElementById('chart-activity').getContext('2d');
-            if (activityChart) activityChart.destroy();
+        let overviewData = null;
+        let activityRows = [];
+        let habitsData = null;
+        let placeRows = [];
 
-            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-            const last7 = [];
-            const labels = [];
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date();
-                d.setDate(d.getDate() - i);
-                const ds = d.toISOString().split('T')[0];
-                labels.push(days[d.getDay()]);
+        let journeyRows = [];
+        let summaryOffset = 0;
+        const summaryPageSize = 12;
+        let canLoadMore = true;
 
-                const dayDistance = allDrives
-                    .filter(x => x.startTime.startsWith(ds))
-                    .reduce((s, x) => s + (x.distanceMeters || 0), 0) * 0.000621371;
-                last7.push(dayDistance.toFixed(1));
+        const driveDetailCache = new Map();
+        const miniMaps = new Map();
+
+        class UnauthorizedError extends Error {}
+
+        function localDateISO(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function rangeFromPreset() {
+            const end = new Date();
+            const endISO = localDateISO(end);
+            if (selectedPreset === 'all') return { start: '2000-01-01', end: endISO };
+            const dayCount = selectedPreset === '7d' ? 7 : selectedPreset === '90d' ? 90 : 30;
+            const start = new Date(end);
+            start.setDate(end.getDate() - (dayCount - 1));
+            return { start: localDateISO(start), end: endISO };
+        }
+
+        function statusDot(mode) {
+            const dot = document.getElementById('sync-dot');
+            dot.classList.remove('warn', 'error');
+            if (mode === 'warn') dot.classList.add('warn');
+            if (mode === 'error') dot.classList.add('error');
+        }
+
+        function setStatus(text, mode = 'ok') {
+            document.getElementById('sync-status').innerText = text;
+            statusDot(mode);
+        }
+
+        function buildStatsParams() {
+            const range = rangeFromPreset();
+            return {
+                start: range.start, end: range.end,
+                deviceId: selectedDeviceId || undefined,
+                tzOffsetMinutes: -new Date().getTimezoneOffset()
+            };
+        }
+
+        function buildSummaryParams(offset = 0, limit = summaryPageSize) {
+            const range = rangeFromPreset();
+            return {
+                start: range.start, end: range.end,
+                deviceId: selectedDeviceId || undefined,
+                offset, limit
+            };
+        }
+
+        async function fetchJSON(path, params = {}) {
+            if (!apiKey) throw new UnauthorizedError();
+            const url = new URL(path, window.location.origin);
+            Object.entries(params).forEach(([k, v]) => {
+                if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+            });
+            const response = await fetch(url.toString(), { headers: { 'X-API-Key': apiKey } });
+            if (response.status === 401) throw new UnauthorizedError();
+            if (!response.ok) {
+                const body = await response.text();
+                throw new Error(`${response.status}: ${body || response.statusText}`);
             }
-
-            activityChart = new Chart(activityCtx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Miles',
-                        data: last7,
-                        borderColor: '#88c0d0',
-                        backgroundColor: 'rgba(136, 192, 208, 0.1)',
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 4,
-                        pointBackgroundColor: '#88c0d0'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { backgroundColor: '#3b4252', titleColor: '#eceff4', bodyColor: '#eceff4', borderColor: '#4c566a', borderWidth: 1 }
-                    },
-                    scales: {
-                        y: { display: false, beginAtZero: true },
-                        x: { grid: { display: false }, ticks: { color: '#4c566a', font: { size: 10 } } }
-                    }
-                }
-            });
-
-            // Intent Chart
-            const intentCtx = document.getElementById('chart-intent').getContext('2d');
-            if (intentChart) intentChart.destroy();
-
-            const intentCounts = {};
-            allDrives.forEach(d => {
-                const reason = d.startReason || 'Manual';
-                intentCounts[reason] = (intentCounts[reason] || 0) + 1;
-            });
-
-            const sortedIntents = Object.entries(intentCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-
-            intentChart = new Chart(intentCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: sortedIntents.map(x => x[0]),
-                    datasets: [{
-                        data: sortedIntents.map(x => x[1]),
-                        backgroundColor: ['#88c0d0', '#81a1c1', '#5e81ac', '#4c566a', '#3b4252'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '75%',
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { backgroundColor: '#3b4252', titleColor: '#eceff4', bodyColor: '#eceff4', borderColor: '#4c566a', borderWidth: 1 }
-                    }
-                }
-            });
+            return response.json();
         }
 
-        function renderList() {
-            const container = document.getElementById('drive-list');
-            container.innerHTML = '';
-
-            const sort = document.getElementById('sort-order').value;
-            const list = [...allDrives];
-
-            if (sort === 'newest') {
-                list.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
-            } else {
-                list.sort((a, b) => b.distanceMeters - a.distanceMeters);
-            }
-
-            list.slice(0, displayLimit).forEach((drive, index) => {
-                const miles = (drive.distanceMeters * 0.000621371).toFixed(1);
-                const mins = Math.round(drive.durationSeconds / 60);
-                const date = new Date(drive.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                const time = new Date(drive.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-
-                const events = (drive.hardBrakeCount || 0) + (drive.hardAccelCount || 0) + (drive.hardCornerCount || 0);
-                const batteryDrain = drive.batteryLevelAtStart && drive.batteryLevelAtEnd
-                    ? ((drive.batteryLevelAtStart - drive.batteryLevelAtEnd) * 100).toFixed(1)
-                    : null;
-
-                const card = document.createElement('div');
-                card.className = 'drive-card';
-                card.onclick = () => openMap(drive);
-                card.innerHTML = `
-                    <div class="drive-map" id="map-${drive.driveId}"></div>
-                    <div class="drive-info">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                            <div>
-                                <div class="drive-time">${date} <span style="color: var(--nord3); font-weight: 400;">• ${time}</span></div>
-                                <div class="drive-meta">${drive.startReason || 'System Wake'}</div>
-                            </div>
-                            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                                <span class="tag" style="background: ${getScoreColor(drive)}; color: #fff;">${events > 0 ? events + ' Events' : 'Perfect'}</span>
-                                ${batteryDrain ? `<span style="font-size: 10px; color: var(--nord13);">-${batteryDrain}% bat</span>` : ''}
-                            </div>
-                        </div>
-                        <div class="drive-stats">
-                            <div class="stat-item">
-                                <span class="stat-val">${miles}</span>
-                                <span class="stat-lbl">Miles</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-val">${mins}</span>
-                                <span class="stat-lbl">Mins</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-val">${Math.round(drive.maxSpeedMPH || 0)}</span>
-                                <span class="stat-lbl">MPH</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                container.appendChild(card);
-
-                // Small map render
-                setTimeout(() => {
-                    const el = document.getElementById(`map-${drive.driveId}`);
-                    if (el) {
-                        const m = L.map(el, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false });
-                        L.tileLayer(mapStyle).addTo(m);
-                        const coords = decodePolyline(drive.polyline);
-                        if (coords.length) {
-                            L.polyline(coords, { color: '#88c0d0', weight: 4, opacity: 0.9 }).addTo(m);
-                            m.fitBounds(L.polyline(coords).getBounds(), { padding: [15, 15] });
-                        }
-                    }
-                }, 50);
-            });
+        function formatMiles(meters) { return `${(meters * METERS_TO_MILES).toFixed(1)} mi`; }
+        function formatDuration(seconds) {
+            if (!seconds || seconds <= 0) return '0m';
+            const mins = Math.round(seconds / 60);
+            if (mins < 60) return `${mins}m`;
+            return `${Math.floor(mins / 60)}h ${mins % 60}m`;
         }
+        function formatPercent(value, digits = 1) { return `${Number(value || 0).toFixed(digits)}%`; }
+        function formatNumber(value, digits = 1) { return Number(value || 0).toFixed(digits); }
 
-        function getScoreColor(d) {
-            const events = (d.hardBrakeCount || 0) + (d.hardAccelCount || 0) + (d.hardCornerCount || 0);
-            if (events > 2) return '#bf616a';
-            if (events > 0) return '#d08770';
-            return '#4c566a';
-        }
-
-        function loadMore() {
-            displayLimit += 9;
-            renderList();
-        }
-
-        function toggleMap() {
-            alert('Global Map view under construction.');
-        }
-
-        let modalMap = null;
-        function openMap(drive) {
-            document.getElementById('map-modal').style.display = 'flex';
-            document.getElementById('map-modal-title').innerText = `Journey on ${new Date(drive.startTime).toLocaleDateString()}`;
-
-            setTimeout(() => {
-                if (modalMap) modalMap.remove();
-                modalMap = L.map('full-map').setView([0, 0], 13);
-                L.tileLayer(mapStyle).addTo(modalMap);
-                const coords = decodePolyline(drive.polyline);
-                if (coords.length) {
-                    L.polyline(coords, { color: '#88c0d0', weight: 4 }).addTo(modalMap);
-                    modalMap.fitBounds(L.polyline(coords).getBounds());
-                }
-            }, 200);
-        }
-
-        function closeMap() {
-            document.getElementById('map-modal').style.display = 'none';
-        }
-
-        function decodePolyline(str, precision) {
-            let index = 0, lat = 0, lng = 0, coordinates = [], shift = 0, result = 0, byte = null, latitude_change, longitude_change, factor = Math.pow(10, precision || 5);
+        function decodePolyline(str, precision = 5) {
+            let index = 0, lat = 0, lng = 0;
+            const coordinates = [], factor = Math.pow(10, precision);
             if (!str) return [];
             while (index < str.length) {
-                byte = null; shift = 0; result = 0;
+                let result = 0, shift = 0, byte;
                 do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
-                latitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
-                shift = result = 0;
+                lat += result & 1 ? ~(result >> 1) : result >> 1;
+                result = 0; shift = 0;
                 do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
-                longitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
-                lat += latitude_change; lng += longitude_change;
+                lng += result & 1 ? ~(result >> 1) : result >> 1;
                 coordinates.push([lat / factor, lng / factor]);
             }
             return coordinates;
         }
+
+        /* ---------- Overview ---------- */
+        function renderOverview() {
+            if (!overviewData) return;
+            const totalMiles = overviewData.totalDistanceMeters * METERS_TO_MILES;
+            const totalHours = overviewData.totalDurationSeconds / 3600;
+
+            document.getElementById('kpi-distance').innerText = `${totalMiles.toLocaleString(undefined, { maximumFractionDigits: 1 })} mi`;
+            document.getElementById('kpi-distance-sub').innerText = `${formatNumber(totalHours, 1)} total hours`;
+            document.getElementById('kpi-drives').innerText = (overviewData.driveCount || 0).toLocaleString();
+            document.getElementById('kpi-micro').innerText = `${overviewData.microTripCount || 0} micro trips`;
+            document.getElementById('kpi-duration').innerText = formatDuration(overviewData.avgDriveDurationSeconds);
+            document.getElementById('kpi-speed').innerText = `${formatNumber(overviewData.avgSpeedMPH, 1)} mph avg`;
+            document.getElementById('kpi-event-rate').innerText = formatNumber(overviewData.eventRatePer100Miles, 1);
+            document.getElementById('kpi-detect').innerText = `${Math.round(overviewData.quality?.avgDetectionLatencyMs || 0)} ms`;
+            document.getElementById('kpi-gap').innerText = `p95 gap ${Math.round(overviewData.quality?.p95MaxGapMs || 0)} ms`;
+            document.getElementById('kpi-battery').innerText = `${formatNumber(overviewData.avgBatteryDrainPerHour, 1)}%/hr`;
+            document.getElementById('kpi-streak').innerText = `streak ${overviewData.currentDriveDayStreak || 0} days`;
+
+            document.getElementById('metric-brake').innerText = overviewData.eventCounts?.hardBrake || 0;
+            document.getElementById('metric-accel').innerText = overviewData.eventCounts?.hardAccel || 0;
+            document.getElementById('metric-corner').innerText = overviewData.eventCounts?.hardCorner || 0;
+            document.getElementById('metric-gforce').innerText = `${formatNumber(overviewData.maxGForce || 0, 2)}g`;
+            document.getElementById('metric-drop-rate').innerText = formatPercent((overviewData.quality?.avgDroppedSampleRate || 0) * 100, 1);
+
+            document.getElementById('side-quick-drives').innerText = `${overviewData.driveCount || 0}`;
+            document.getElementById('side-quick-rate').innerText = `${formatNumber(overviewData.eventRatePer100Miles || 0, 1)}/100`;
+            document.getElementById('side-quick-device').innerText = selectedDeviceId ? selectedDeviceId.slice(0, 8) : 'all';
+        }
+
+        /* ---------- Behavior donut ---------- */
+        function renderBehaviorChart() {
+            if (!overviewData) return;
+            const ctx = document.getElementById('behavior-chart').getContext('2d');
+            if (behaviorChart) behaviorChart.destroy();
+            behaviorChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Hard Brake', 'Hard Accel', 'Hard Corner'],
+                    datasets: [{
+                        data: [
+                            overviewData.eventCounts?.hardBrake || 0,
+                            overviewData.eventCounts?.hardAccel || 0,
+                            overviewData.eventCounts?.hardCorner || 0
+                        ],
+                        backgroundColor: ['#f44747', '#ce9178', '#dcdcaa'],
+                        borderWidth: 0, hoverBorderWidth: 2, hoverBorderColor: '#d4d4d4'
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, cutout: '68%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#252526', titleColor: '#d4d4d4', bodyColor: '#d4d4d4',
+                            borderColor: '#3c3c3c', borderWidth: 1, cornerRadius: 4
+                        }
+                    }
+                }
+            });
+        }
+
+        /* ---------- Activity chart ---------- */
+        function renderActivityChart() {
+            const ctx = document.getElementById('activity-chart').getContext('2d');
+            if (activityChart) activityChart.destroy();
+            const labels = activityRows.map(row => {
+                const date = new Date(`${row.date}T00:00:00`);
+                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            });
+            const dataset = selectedActivityMetric === 'distance'
+                ? activityRows.map(row => Number((row.distanceMeters * METERS_TO_MILES).toFixed(1)))
+                : activityRows.map(row => row.driveCount || 0);
+            document.getElementById('activity-copy').innerText = selectedActivityMetric === 'distance' ? 'distance by day (mi)' : 'drive count by day';
+
+            activityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: selectedActivityMetric === 'distance' ? 'Miles' : 'Drives',
+                        data: dataset,
+                        borderColor: '#569cd6',
+                        backgroundColor: 'rgba(86,156,214,0.08)',
+                        fill: true, pointRadius: 2,
+                        pointBackgroundColor: '#569cd6', pointBorderColor: '#569cd6',
+                        pointHoverRadius: 4, tension: 0.3, borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#252526', titleColor: '#d4d4d4', bodyColor: '#d4d4d4',
+                            borderColor: '#3c3c3c', borderWidth: 1, cornerRadius: 4
+                        }
+                    },
+                    scales: {
+                        y: { grid: { color: 'rgba(60,60,60,0.5)', drawBorder: false }, ticks: { color: '#858585', font: { size: 11 } }, border: { display: false } },
+                        x: { grid: { color: 'rgba(60,60,60,0.3)', drawBorder: false }, ticks: { color: '#858585', maxTicksLimit: 8, font: { size: 11 } }, border: { display: false } }
+                    }
+                }
+            });
+        }
+
+        /* ---------- Heatmap ---------- */
+        function heatColor(level) {
+            if (level <= 0) return '#2d2d30';
+            if (level === 1) return '#3c3c3c';
+            if (level === 2) return '#264f78';
+            if (level === 3) return '#007acc';
+            if (level === 4) return '#569cd6';
+            return '#4fc1ff';
+        }
+
+        function renderHabitGrid() {
+            const grid = document.getElementById('habit-grid');
+            grid.innerHTML = '';
+            const cells = habitsData?.heatmap || [];
+            if (!cells.length) { grid.innerHTML = '<div class="empty">No habit data in this range.</div>'; return; }
+            const weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+            const cellMap = new Map();
+            cells.forEach(cell => cellMap.set(`${cell.weekday}-${cell.hour}`, cell.driveCount || 0));
+            const max = Math.max(...cells.map(c => c.driveCount || 0), 1);
+            for (let weekday = 0; weekday < 7; weekday++) {
+                for (let hour = 0; hour < 24; hour++) {
+                    const count = cellMap.get(`${weekday}-${hour}`) || 0;
+                    const normalized = max > 0 ? Math.ceil((count / max) * 5) : 0;
+                    const div = document.createElement('div');
+                    div.className = 'habit-cell';
+                    div.style.background = heatColor(normalized);
+                    div.title = `${weekdays[weekday]} ${String(hour).padStart(2,'0')}:00 — ${count} drives`;
+                    grid.appendChild(div);
+                }
+            }
+        }
+
+        /* ---------- Places ---------- */
+        function renderPlaces() {
+            const container = document.getElementById('places-list');
+            container.innerHTML = '';
+            if (!placeRows.length) {
+                container.innerHTML = '<div class="empty">No visit data in this range.</div>';
+                document.getElementById('side-quick-place').innerText = 'n/a';
+                return;
+            }
+            const topPlace = placeRows[0]?.placeName || 'n/a';
+            document.getElementById('side-quick-place').innerText = topPlace.length > 10 ? `${topPlace.slice(0,10)}…` : topPlace;
+
+            placeRows.forEach(place => {
+                const row = document.createElement('div');
+                row.className = 'place-row';
+                const hours = (place.totalDwellSeconds || 0) / 3600;
+                const avgMinutes = Math.round((place.avgDwellSeconds || 0) / 60);
+                const lastVisited = place.lastVisited ? new Date(place.lastVisited).toLocaleDateString() : 'n/a';
+                row.innerHTML = `
+                    <div>
+                        <p class="place-title">${place.placeName}</p>
+                        <p class="place-sub">${place.visitCount} visits · avg ${avgMinutes}m · last ${lastVisited}</p>
+                    </div>
+                    <strong class="mono" style="font-size:12px;">${formatNumber(hours, 1)}h</strong>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        /* ---------- Journey cards with mini maps ---------- */
+        function badgeClass(eventCount) {
+            if (eventCount >= 5) return 'badge badge-danger';
+            if (eventCount >= 2) return 'badge badge-warn';
+            return 'badge badge-clean';
+        }
+
+        function destroyMiniMaps() {
+            miniMaps.forEach(map => { try { map.remove(); } catch(e) {} });
+            miniMaps.clear();
+        }
+
+        function initMiniMaps() {
+            document.querySelectorAll('.journey-minimap[data-polyline]').forEach(el => {
+                const driveId = el.dataset.driveid;
+                const polyline = el.dataset.polyline;
+                if (!polyline || miniMaps.has(driveId)) return;
+
+                const coords = decodePolyline(polyline);
+                if (coords.length < 2) {
+                    el.outerHTML = '<div class="journey-no-map">No route data</div>';
+                    return;
+                }
+
+                const map = L.map(el, {
+                    zoomControl: false, attributionControl: false,
+                    dragging: false, scrollWheelZoom: false,
+                    doubleClickZoom: false, touchZoom: false,
+                    boxZoom: false, keyboard: false, tap: false
+                });
+
+                L.tileLayer(mapStyle, { subdomains: 'abcd', maxZoom: 18 }).addTo(map);
+
+                const route = L.polyline(coords, { color: '#569cd6', weight: 2.5, opacity: 0.9 }).addTo(map);
+
+                L.circleMarker(coords[0], {
+                    radius: 3, fillColor: '#4ec9b0', color: '#4ec9b0', fillOpacity: 1, weight: 0
+                }).addTo(map);
+
+                L.circleMarker(coords[coords.length - 1], {
+                    radius: 3, fillColor: '#f44747', color: '#f44747', fillOpacity: 1, weight: 0
+                }).addTo(map);
+
+                map.fitBounds(route.getBounds(), { padding: [12, 12] });
+                miniMaps.set(driveId, map);
+            });
+        }
+
+        function renderJourneyList() {
+            destroyMiniMaps();
+            const container = document.getElementById('journey-list');
+            container.innerHTML = '';
+
+            const sort = document.getElementById('journey-sort').value;
+            const rows = [...journeyRows];
+            if (sort === 'longest') rows.sort((a, b) => (b.distanceMeters || 0) - (a.distanceMeters || 0));
+            else if (sort === 'events') rows.sort((a, b) => (b.eventCount || 0) - (a.eventCount || 0));
+            else rows.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+
+            if (!rows.length) {
+                container.innerHTML = '<div class="empty">No drives found for this filter.</div>';
+                return;
+            }
+
+            rows.forEach(drive => {
+                const start = new Date(drive.startTime);
+                const battery = drive.batteryDrainPercent == null ? 'n/a' : `${drive.batteryDrainPercent.toFixed(1)}%`;
+                const hasPolyline = drive.polyline && drive.polyline.length > 0;
+
+                const card = document.createElement('div');
+                card.className = 'journey-card';
+
+                const mapHtml = hasPolyline
+                    ? `<div class="journey-minimap" data-polyline="${drive.polyline}" data-driveid="${drive.driveId}"></div>`
+                    : `<div class="journey-no-map">No route data</div>`;
+
+                card.innerHTML = `
+                    ${mapHtml}
+                    <div class="journey-content">
+                        <div class="journey-head">
+                            <div>
+                                <div class="journey-time">${start.toLocaleDateString()} ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                <div class="journey-sub">${drive.deviceId || 'unknown'}</div>
+                            </div>
+                            <span class="${badgeClass(drive.eventCount || 0)}">${drive.eventCount || 0} events</span>
+                        </div>
+                        <div class="journey-stats">
+                            <div class="journey-stat"><strong>${(drive.distanceMeters * METERS_TO_MILES).toFixed(1)}</strong><span>miles</span></div>
+                            <div class="journey-stat"><strong>${Math.round((drive.durationSeconds || 0) / 60)}</strong><span>mins</span></div>
+                            <div class="journey-stat"><strong>${Math.round(drive.avgSpeedMPH || 0)}</strong><span>avg mph</span></div>
+                            <div class="journey-stat"><strong>${Math.round(drive.maxSpeedMPH || 0)}</strong><span>max mph</span></div>
+                        </div>
+                        <div class="journey-footer">battery drain: ${battery}</div>
+                    </div>
+                `;
+
+                card.addEventListener('click', () => openDriveDetail(drive.driveId));
+                container.appendChild(card);
+            });
+
+            document.getElementById('status-loaded').innerText = `${journeyRows.length} drives`;
+            document.getElementById('load-more-btn').style.display = canLoadMore ? 'inline-flex' : 'none';
+
+            requestAnimationFrame(() => initMiniMaps());
+        }
+
+        function updateDeviceOptions(deviceIds = []) {
+            const select = document.getElementById('device-filter');
+            const existing = new Set(Array.from(select.options).map(o => o.value));
+            deviceIds.forEach(id => {
+                if (!existing.has(id)) {
+                    const opt = document.createElement('option');
+                    opt.value = id; opt.textContent = id;
+                    select.appendChild(opt);
+                }
+            });
+            if (selectedDeviceId && !deviceIds.includes(selectedDeviceId)) {
+                selectedDeviceId = '';
+                select.value = '';
+            }
+        }
+
+        /* ---------- Data loading ---------- */
+        async function loadSummaries({ reset } = { reset: false }) {
+            if (reset) { summaryOffset = 0; journeyRows = []; canLoadMore = true; }
+            if (!canLoadMore) return;
+            const rows = await fetchJSON('/drives/summary', buildSummaryParams(summaryOffset, summaryPageSize));
+            summaryOffset += rows.length;
+            canLoadMore = rows.length === summaryPageSize;
+            journeyRows = reset ? rows : journeyRows.concat(rows);
+            renderJourneyList();
+        }
+
+        async function refreshDashboard({ resetList = true } = {}) {
+            setStatus('Syncing…', 'warn');
+            const statsParams = buildStatsParams();
+            const range = rangeFromPreset();
+            document.getElementById('status-range').innerText = selectedPreset.toUpperCase();
+            try {
+                const [overview, activity, habits, places] = await Promise.all([
+                    fetchJSON('/stats/overview', statsParams),
+                    fetchJSON('/stats/activity', { ...statsParams, bucket: 'day' }),
+                    fetchJSON('/stats/habits', statsParams),
+                    fetchJSON('/stats/places', { ...statsParams, limit: 8 })
+                ]);
+                overviewData = overview; activityRows = activity; habitsData = habits; placeRows = places;
+                updateDeviceOptions(overviewData.deviceIds || []);
+                renderOverview(); renderBehaviorChart(); renderActivityChart();
+                renderHabitGrid(); renderPlaces();
+                await loadSummaries({ reset: resetList });
+                setStatus(`Synced ${range.start} \u2192 ${range.end}`);
+            } catch (err) {
+                if (err instanceof UnauthorizedError) {
+                    apiKey = null; localStorage.removeItem('life247_api_key');
+                    document.getElementById('auth-modal').style.display = 'flex';
+                    setStatus('Unauthorized', 'error'); return;
+                }
+                console.error(err); setStatus('Sync failed', 'error');
+            }
+        }
+
+        function setPreset(preset) {
+            selectedPreset = preset;
+            document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.preset === preset));
+            refreshDashboard({ resetList: true });
+        }
+
+        function setActivityMetric(metric) {
+            selectedActivityMetric = metric;
+            document.querySelectorAll('.metric-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.metric === metric));
+            renderActivityChart();
+        }
+
+        /* ---------- Drive detail modal ---------- */
+        function eventColor(eventType) {
+            if (!eventType) return '#569cd6';
+            if (eventType.includes('Brake')) return '#f44747';
+            if (eventType.includes('Acceleration')) return '#ce9178';
+            if (eventType.includes('Corner')) return '#dcdcaa';
+            return '#569cd6';
+        }
+
+        function renderSpeedChart(detail) {
+            const ctx = document.getElementById('speed-chart').getContext('2d');
+            if (speedChart) speedChart.destroy();
+            const speeds = Array.isArray(detail.speeds) ? detail.speeds : [];
+            speedChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: speeds.map((_, idx) => idx + 1),
+                    datasets: [{
+                        label: 'MPH', data: speeds,
+                        borderColor: '#569cd6', backgroundColor: 'rgba(86,156,214,0.08)',
+                        fill: true, pointRadius: 0, tension: 0.25, borderWidth: 1.5
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#252526', titleColor: '#d4d4d4', bodyColor: '#d4d4d4', borderColor: '#3c3c3c', borderWidth: 1, cornerRadius: 4 }
+                    },
+                    scales: {
+                        y: { grid: { color: 'rgba(60,60,60,0.5)', drawBorder: false }, ticks: { color: '#858585', font: { size: 10 } }, border: { display: false } },
+                        x: { display: false }
+                    }
+                }
+            });
+        }
+
+        function renderQuality(detail) {
+            const sampleCount = detail.locationSampleCount || 0;
+            const droppedCount = detail.droppedSampleCount || 0;
+            const dropRate = sampleCount > 0 ? (droppedCount / sampleCount) * 100 : 0;
+            const rows = [
+                ['Detection', `${Math.round(detail.detectionLatencyMs || 0)} ms`],
+                ['Confirmation', `${Math.round(detail.confirmationLatencyMs || 0)} ms`],
+                ['Dropped Rate', `${dropRate.toFixed(1)}%`],
+                ['Max GPS Gap', `${Math.round(detail.maxGapBetweenSamplesMs || 0)} ms`],
+                ['Samples', `${sampleCount}`],
+                ['Buffered Pts', `${detail.bufferedPointCount || 0}`]
+            ];
+            document.getElementById('quality-grid').innerHTML = rows.map(([label, value]) => `
+                <div class="quality-item"><div class="q-label">${label}</div><div class="q-val">${value}</div></div>
+            `).join('');
+        }
+
+        function renderTimeline(logEntries = []) {
+            const container = document.getElementById('timeline-log');
+            if (!Array.isArray(logEntries) || !logEntries.length) {
+                container.innerHTML = '<div class="empty">No timeline entries available.</div>';
+                return;
+            }
+            container.innerHTML = logEntries.slice().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)).map(entry => {
+                const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--';
+                return `<div class="timeline-row"><div><strong>${entry.eventType || 'event'}</strong> <span class="mono">${time}</span></div><div style="color:var(--text-secondary);margin-top:2px;">${entry.message || ''}</div></div>`;
+            }).join('');
+        }
+
+        async function openDriveDetail(driveId) {
+            try {
+                let detail = driveDetailCache.get(driveId);
+                if (!detail) {
+                    detail = await fetchJSON(`/drives/${driveId}`);
+                    driveDetailCache.set(driveId, detail);
+                }
+                const date = detail.startTime ? new Date(detail.startTime) : null;
+                document.getElementById('drive-modal-title').innerText = `Drive \u2014 ${date ? date.toLocaleString() : driveId}`;
+                document.getElementById('detail-events-brake').innerText = detail.hardBrakeCount || 0;
+                document.getElementById('detail-events-accel').innerText = detail.hardAccelCount || 0;
+                document.getElementById('detail-events-corner').innerText = detail.hardCornerCount || 0;
+                document.getElementById('detail-events-total').innerText = (detail.hardBrakeCount || 0) + (detail.hardAccelCount || 0) + (detail.hardCornerCount || 0);
+
+                renderSpeedChart(detail); renderQuality(detail); renderTimeline(detail.logEntries || []);
+                document.getElementById('timeline-log').classList.remove('open');
+                document.getElementById('toggle-log-btn').innerText = 'Show Timeline Log';
+                document.getElementById('drive-modal').style.display = 'flex';
+
+                setTimeout(() => {
+                    if (detailMap) { detailMap.remove(); detailMap = null; }
+                    detailMap = L.map('drive-map');
+                    L.tileLayer(mapStyle).addTo(detailMap);
+                    const coords = decodePolyline(detail.polyline || '');
+                    if (coords.length) {
+                        const route = L.polyline(coords, { color: '#569cd6', weight: 4, opacity: 0.9 }).addTo(detailMap);
+                        L.circleMarker(coords[0], { radius: 6, fillColor: '#4ec9b0', color: '#4ec9b0', fillOpacity: 1, weight: 0 }).addTo(detailMap).bindPopup('Start');
+                        L.circleMarker(coords[coords.length - 1], { radius: 6, fillColor: '#f44747', color: '#f44747', fillOpacity: 1, weight: 0 }).addTo(detailMap).bindPopup('End');
+                        detailMap.fitBounds(route.getBounds(), { padding: [24, 24] });
+                    }
+                    if (Array.isArray(detail.accelerationEvents)) {
+                        detail.accelerationEvents.forEach(event => {
+                            if (typeof event.latitude !== 'number' || typeof event.longitude !== 'number') return;
+                            L.circleMarker([event.latitude, event.longitude], {
+                                radius: 5, color: eventColor(event.eventType),
+                                fillColor: eventColor(event.eventType), fillOpacity: 0.8, weight: 1
+                            }).addTo(detailMap).bindPopup(`${event.eventType || 'event'}<br>${(event.gForceMagnitude || 0).toFixed(2)}g`);
+                        });
+                    }
+                }, 100);
+            } catch (err) { console.error(err); setStatus('Failed loading drive detail', 'error'); }
+        }
+
+        function closeDriveDetail() {
+            document.getElementById('drive-modal').style.display = 'none';
+            if (detailMap) { detailMap.remove(); detailMap = null; }
+        }
+
+        /* ---------- Sidebar nav ---------- */
+        function setActiveSidebarLink(targetId) {
+            document.querySelectorAll('.nav-link[data-target]').forEach(link => link.classList.toggle('active', link.dataset.target === targetId));
+        }
+
+        function bindSidebarNav() {
+            const navLinks = Array.from(document.querySelectorAll('.nav-link[data-target]'));
+            navLinks.forEach(link => {
+                link.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    const targetId = link.dataset.target;
+                    const target = document.getElementById(targetId);
+                    if (!target) return;
+                    setActiveSidebarLink(targetId);
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+            });
+            const sections = ['section-overview','section-activity','section-habits','section-journeys'].map(id => document.getElementById(id)).filter(Boolean);
+            if (!sections.length || typeof IntersectionObserver === 'undefined') return;
+            const observer = new IntersectionObserver((entries) => {
+                const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+                if (visible.length) setActiveSidebarLink(visible[0].target.id);
+            }, { root: null, rootMargin: '-20% 0px -60% 0px', threshold: [0.2, 0.4, 0.6] });
+            sections.forEach(s => observer.observe(s));
+        }
+
+        /* ---------- Boot ---------- */
+        function bindUI() {
+            bindSidebarNav();
+            document.querySelectorAll('.preset-btn').forEach(btn => btn.addEventListener('click', () => setPreset(btn.dataset.preset)));
+            document.querySelectorAll('.metric-btn').forEach(btn => btn.addEventListener('click', () => setActivityMetric(btn.dataset.metric)));
+            document.getElementById('device-filter').addEventListener('change', (e) => { selectedDeviceId = e.target.value; refreshDashboard({ resetList: true }); });
+            document.getElementById('journey-sort').addEventListener('change', renderJourneyList);
+            document.getElementById('load-more-btn').addEventListener('click', () => loadSummaries({ reset: false }));
+            document.getElementById('refresh-btn').addEventListener('click', () => refreshDashboard({ resetList: true }));
+            document.getElementById('close-drive-modal').addEventListener('click', closeDriveDetail);
+            document.getElementById('drive-modal').addEventListener('click', (e) => { if (e.target === document.getElementById('drive-modal')) closeDriveDetail(); });
+            document.getElementById('toggle-log-btn').addEventListener('click', () => {
+                const log = document.getElementById('timeline-log');
+                log.classList.toggle('open');
+                document.getElementById('toggle-log-btn').innerText = log.classList.contains('open') ? 'Hide Timeline Log' : 'Show Timeline Log';
+            });
+            document.getElementById('auth-submit').addEventListener('click', () => {
+                const input = document.getElementById('api-key-input').value.trim();
+                if (!input) return;
+                apiKey = input; localStorage.setItem('life247_api_key', apiKey);
+                document.getElementById('auth-modal').style.display = 'none';
+                refreshDashboard({ resetList: true });
+            });
+            document.getElementById('api-key-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('auth-submit').click(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDriveDetail(); });
+        }
+
+        function boot() {
+            bindUI();
+            if (!apiKey) {
+                document.getElementById('auth-modal').style.display = 'flex';
+                setStatus('Awaiting API key', 'warn');
+                return;
+            }
+            refreshDashboard({ resetList: true });
+        }
+
+        document.addEventListener('DOMContentLoaded', boot);
     </script>
 </body>
-
 </html>

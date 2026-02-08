@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional, List
 import os
 
@@ -98,8 +98,22 @@ class DriveResponse(BaseModel):
     # Timeline Events
     logEntries: Optional[List[dict]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DriveSummaryResponse(BaseModel):
+    """Lightweight response model for dashboard lists"""
+    driveId: str
+    deviceId: str
+    startTime: str
+    endTime: str
+    distanceMeters: float
+    durationSeconds: float
+    avgSpeedMPH: float
+    maxSpeedMPH: float
+    eventCount: int
+    batteryDrainPercent: Optional[float] = None
+    polyline: Optional[str] = None
 
 
 def verify_api_key(x_api_key: str = Header(...)):
@@ -223,6 +237,58 @@ def list_drives(
     ]
 
 
+@router.get("/drives/summary", response_model=List[DriveSummaryResponse])
+def list_drive_summaries(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    deviceId: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_api_key),
+):
+    """List lightweight drive summaries for dashboard cards."""
+    query = db.query(Drive).filter(Drive.startTime.is_not(None))
+
+    try:
+        if start:
+            start_date = date.fromisoformat(start)
+            start_dt = datetime.combine(start_date, time.min)
+            query = query.filter(Drive.startTime >= start_dt)
+        if end:
+            end_date = date.fromisoformat(end)
+            end_exclusive = datetime.combine(end_date + timedelta(days=1), time.min)
+            query = query.filter(Drive.startTime < end_exclusive)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start and end must be ISO dates (YYYY-MM-DD)")
+
+    if deviceId:
+        query = query.filter(Drive.deviceId == deviceId)
+
+    drives = query.order_by(Drive.startTime.desc()).offset(offset).limit(limit).all()
+
+    return [
+        DriveSummaryResponse(
+            driveId=d.driveId,
+            deviceId=d.deviceId,
+            startTime=d.startTime.replace(tzinfo=timezone.utc).isoformat() if d.startTime else "",
+            endTime=d.endTime.replace(tzinfo=timezone.utc).isoformat() if d.endTime else "",
+            distanceMeters=d.distanceMeters,
+            durationSeconds=d.durationSeconds,
+            avgSpeedMPH=d.avgSpeedMPH,
+            maxSpeedMPH=d.maxSpeedMPH,
+            eventCount=(d.hardBrakeCount or 0) + (d.hardAccelCount or 0) + (d.hardCornerCount or 0),
+            batteryDrainPercent=(
+                round((d.batteryLevelAtStart - d.batteryLevelAtEnd) * 100.0, 2)
+                if d.batteryLevelAtStart is not None and d.batteryLevelAtEnd is not None
+                else None
+            ),
+            polyline=d.polyline,
+        )
+        for d in drives
+    ]
+
+
 @router.get("/drives/{drive_id}")
 def get_drive(
     drive_id: str,
@@ -244,6 +310,7 @@ def get_drive(
         "avgSpeedMPH": drive.avgSpeedMPH,
         "maxSpeedMPH": drive.maxSpeedMPH,
         "polyline": drive.polyline,
+        "speeds": drive.speeds,
         "pointCount": drive.pointCount,
         "simplifiedPointCount": drive.simplifiedPointCount,
         "startReason": drive.startReason,
