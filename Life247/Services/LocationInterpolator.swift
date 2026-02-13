@@ -32,6 +32,10 @@ class LocationInterpolator {
     /// Counter that increments on each display update - use this for onChange observation
     /// (CLLocationCoordinate2D doesn't conform to Equatable, but Int does)
     private(set) var updateCounter: Int = 0
+
+    /// Wall-clock time of the most recent accepted GPS sample.
+    /// Used by UI to detect stale interpolation output and fall back to raw GPS.
+    private(set) var lastSampleReceivedAt: Date?
     
     // MARK: - Private State
     
@@ -133,6 +137,8 @@ class LocationInterpolator {
                 return  // Already have a position, ignore stale update
             }
         }
+
+        lastSampleReceivedAt = Date()
         
         let shouldSnap = shouldReset(from: lastLocation, to: location)
         
@@ -243,6 +249,7 @@ class LocationInterpolator {
         animationStartDate = nil
         animationStartCoordinate = nil
         animationStartHeading = nil
+        lastSampleReceivedAt = nil
         updateCounter = 0
     }
     

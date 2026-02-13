@@ -16,6 +16,10 @@ struct TimelineBuilder {
     static let minimumStopDuration: TimeInterval = 120
     static let maxInDriveStopDisplacement: CLLocationDistance = 120
     static let maxInDriveStopEndpointSpeedMPH: Double = 12
+    static let maxTripIntermediateStopDuration: TimeInterval = 60 * 60
+    static let tripIntermediateStopGrace: TimeInterval = 2 * 60
+    static let maxTripSpan: TimeInterval = 6 * 60 * 60
+    static let minimumTripDriveCount: Int = 2
     
     /// Build timeline from drives and places.
     /// - Parameters:
@@ -26,6 +30,7 @@ struct TimelineBuilder {
     static func buildTimeline(
         drives: [Drive],
         places: [Place],
+        tripGroupingEnabled: Bool = false,
         limit: Int? = nil
     ) async -> [TimelineItem] {
         guard !drives.isEmpty else { return [] }
@@ -147,7 +152,11 @@ struct TimelineBuilder {
             }
         }
         
-        return linkedItems
+        guard tripGroupingEnabled else {
+            return linkedItems
+        }
+
+        return groupTrips(in: linkedItems, places: places)
     }
 
     /// Infer a stop segment inside a single drive from a long stationary GPS gap.
@@ -267,5 +276,454 @@ struct TimelineBuilder {
             return place.name
         }
         return nil
+    }
+
+    private struct DriveContext {
+        let timelineIndex: Int
+        let drive: Drive
+        let destinationName: String?
+        let destinationStopIndex: Int?
+        let destinationStop: InferredStop?
+        let inDriveStopIndex: Int?
+    }
+
+    private struct TripAssembly {
+        let insertionIndex: Int
+        let consumedIndices: Set<Int>
+        let trip: TripGroup
+    }
+
+    private static func groupTrips(
+        in items: [TimelineItem],
+        places: [Place]
+    ) -> [TimelineItem] {
+        guard items.count >= 2 else { return items }
+
+        let homePlaces = places.filter { place in
+            isHomePlace(place)
+        }
+        guard !homePlaces.isEmpty else { return items }
+
+        let homePlaceIDs = Set(homePlaces.map(\.placeId))
+        let homeNameKeys = Set(homePlaces.map { normalizedPlaceName($0.name) })
+
+        let driveContextsNewestFirst = extractDriveContexts(from: items)
+        guard driveContextsNewestFirst.count >= minimumTripDriveCount else { return items }
+
+        let driveContextsChronological = Array(driveContextsNewestFirst.reversed())
+        let groupRanges = findTripRanges(
+            in: driveContextsChronological,
+            homePlaces: homePlaces,
+            homePlaceIDs: homePlaceIDs,
+            homeNameKeys: homeNameKeys
+        )
+        guard !groupRanges.isEmpty else { return items }
+
+        let assemblies = groupRanges.compactMap { range -> TripAssembly? in
+            assembleTrip(
+                for: range,
+                contexts: driveContextsChronological,
+                items: items,
+                homePlaceIDs: homePlaceIDs,
+                homeNameKeys: homeNameKeys
+            )
+        }
+        guard !assemblies.isEmpty else { return items }
+
+        var consumedToAssembly: [Int: Int] = [:]
+        for (assemblyIndex, assembly) in assemblies.enumerated() {
+            for idx in assembly.consumedIndices {
+                consumedToAssembly[idx] = assemblyIndex
+            }
+        }
+
+        var grouped: [TimelineItem] = []
+        grouped.reserveCapacity(items.count)
+
+        for idx in items.indices {
+            guard let assemblyIndex = consumedToAssembly[idx] else {
+                grouped.append(items[idx])
+                continue
+            }
+            let assembly = assemblies[assemblyIndex]
+            if idx == assembly.insertionIndex {
+                grouped.append(.trip(assembly.trip))
+            }
+        }
+
+        return grouped
+    }
+
+    private static func extractDriveContexts(from items: [TimelineItem]) -> [DriveContext] {
+        var contexts: [DriveContext] = []
+        contexts.reserveCapacity(items.count)
+
+        for idx in items.indices {
+            guard case .drive(let drive, _, _, let destinationName) = items[idx] else { continue }
+
+            var destinationStopIndex: Int?
+            var destinationStop: InferredStop?
+            if idx > 0,
+               case .stop(let stop) = items[idx - 1],
+               stop.source == .betweenDrives {
+                destinationStopIndex = idx - 1
+                destinationStop = stop
+            }
+
+            var inDriveStopIndex: Int?
+            if idx + 1 < items.count,
+               case .stop(let stop) = items[idx + 1],
+               stop.source == .inDriveGap {
+                inDriveStopIndex = idx + 1
+            }
+
+            contexts.append(
+                DriveContext(
+                    timelineIndex: idx,
+                    drive: drive,
+                    destinationName: destinationName,
+                    destinationStopIndex: destinationStopIndex,
+                    destinationStop: destinationStop,
+                    inDriveStopIndex: inDriveStopIndex
+                )
+            )
+        }
+
+        return contexts
+    }
+
+    private static func findTripRanges(
+        in contexts: [DriveContext],
+        homePlaces: [Place],
+        homePlaceIDs: Set<UUID>,
+        homeNameKeys: Set<String>
+    ) -> [ClosedRange<Int>] {
+        guard contexts.count >= minimumTripDriveCount else { return [] }
+
+        let calendar = Calendar.current
+        var ranges: [ClosedRange<Int>] = []
+        var startIndex = 0
+
+        while startIndex < contexts.count {
+            if let range = findTripRange(
+                startingAt: startIndex,
+                in: contexts,
+                calendar: calendar,
+                homePlaces: homePlaces,
+                homePlaceIDs: homePlaceIDs,
+                homeNameKeys: homeNameKeys
+            ) {
+                ranges.append(range)
+                startIndex = range.upperBound + 1
+            } else {
+                startIndex += 1
+            }
+        }
+
+        return ranges
+    }
+
+    private static func findTripRange(
+        startingAt startIndex: Int,
+        in contexts: [DriveContext],
+        calendar: Calendar,
+        homePlaces: [Place],
+        homePlaceIDs: Set<UUID>,
+        homeNameKeys: Set<String>
+    ) -> ClosedRange<Int>? {
+        let startContext = contexts[startIndex]
+        let previousContext = startIndex > 0 ? contexts[startIndex - 1] : nil
+        let startsNewDay: Bool = {
+            guard let previousContext else { return true }
+            return !calendar.isDate(previousContext.drive.startTime, inSameDayAs: startContext.drive.startTime)
+        }()
+
+        guard isHomeTripStart(
+            startContext,
+            previous: previousContext,
+            startsNewDay: startsNewDay,
+            homePlaces: homePlaces,
+            homePlaceIDs: homePlaceIDs,
+            homeNameKeys: homeNameKeys
+        ) else {
+            return nil
+        }
+
+        let tripStartTime = startContext.drive.startTime
+        var hasNonHomeDestination = false
+
+        for endIndex in startIndex..<contexts.count {
+            let context = contexts[endIndex]
+            let contextEndTime = context.drive.endTime ?? context.drive.startTime
+
+            guard calendar.isDate(tripStartTime, inSameDayAs: contextEndTime) else { break }
+            guard contextEndTime.timeIntervalSince(tripStartTime) <= maxTripSpan else { break }
+
+            if endIndex < contexts.count - 1 {
+                guard let stop = context.destinationStop else { break }
+
+                if isHomeStop(stop, homePlaceIDs: homePlaceIDs, homeNameKeys: homeNameKeys) {
+                    let driveCount = endIndex - startIndex + 1
+                    if driveCount >= minimumTripDriveCount, hasNonHomeDestination {
+                        return startIndex...endIndex
+                    }
+                    break
+                }
+
+                if stop.duration > maxTripIntermediateStopDuration + tripIntermediateStopGrace {
+                    break
+                }
+
+                hasNonHomeDestination = true
+            } else {
+                let driveCount = endIndex - startIndex + 1
+                if driveCount >= minimumTripDriveCount,
+                   hasNonHomeDestination,
+                   isHomeDestination(
+                    for: context,
+                    homePlaces: homePlaces,
+                    homePlaceIDs: homePlaceIDs,
+                    homeNameKeys: homeNameKeys
+                   ) {
+                    return startIndex...endIndex
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func assembleTrip(
+        for range: ClosedRange<Int>,
+        contexts: [DriveContext],
+        items: [TimelineItem],
+        homePlaceIDs: Set<UUID>,
+        homeNameKeys: Set<String>
+    ) -> TripAssembly? {
+        let rangeContexts = Array(contexts[range])
+        guard let first = rangeContexts.first,
+              let last = rangeContexts.last else { return nil }
+
+        var consumedIndices: Set<Int> = []
+        var childIndices: Set<Int> = []
+        var intermediateStops: [InferredStop] = []
+
+        for (offset, context) in rangeContexts.enumerated() {
+            consumedIndices.insert(context.timelineIndex)
+            childIndices.insert(context.timelineIndex)
+
+            if let inDriveStopIndex = context.inDriveStopIndex {
+                consumedIndices.insert(inDriveStopIndex)
+                childIndices.insert(inDriveStopIndex)
+            }
+
+            if let destinationStopIndex = context.destinationStopIndex {
+                consumedIndices.insert(destinationStopIndex)
+                let isLastContext = offset == rangeContexts.count - 1
+                if !isLastContext {
+                    childIndices.insert(destinationStopIndex)
+                    if let stop = context.destinationStop {
+                        intermediateStops.append(stop)
+                    }
+                } else if let stop = context.destinationStop,
+                          !isHomeStop(stop, homePlaceIDs: homePlaceIDs, homeNameKeys: homeNameKeys) {
+                    // Defensive fallback for edge cases; should not happen for valid ranges.
+                    childIndices.insert(destinationStopIndex)
+                    intermediateStops.append(stop)
+                }
+            }
+        }
+
+        guard let insertionIndex = consumedIndices.min() else { return nil }
+
+        let childItems = childIndices.sorted().map { items[$0] }
+        guard !childItems.isEmpty else { return nil }
+
+        let totalDistanceMiles = rangeContexts.reduce(0) { $0 + $1.drive.distanceMiles }
+        let totalDriveDuration = rangeContexts.reduce(0) { $0 + $1.drive.duration }
+        let tripStartTime = first.drive.startTime
+        let tripEndTime = last.drive.endTime ?? last.drive.startTime
+        let totalDuration = max(0, tripEndTime.timeIntervalSince(tripStartTime))
+        let title = tripTitle(
+            for: rangeContexts,
+            intermediateStops: intermediateStops,
+            homePlaceIDs: homePlaceIDs,
+            homeNameKeys: homeNameKeys
+        )
+
+        let trip = TripGroup(
+            id: first.drive.id,
+            title: title,
+            items: childItems,
+            driveCount: rangeContexts.count,
+            stopCount: intermediateStops.count,
+            totalDistanceMiles: totalDistanceMiles,
+            totalDuration: totalDuration,
+            totalDriveDuration: totalDriveDuration,
+            startTime: tripStartTime,
+            endTime: tripEndTime
+        )
+
+        return TripAssembly(
+            insertionIndex: insertionIndex,
+            consumedIndices: consumedIndices,
+            trip: trip
+        )
+    }
+
+    private static func tripTitle(
+        for contexts: [DriveContext],
+        intermediateStops: [InferredStop],
+        homePlaceIDs: Set<UUID>,
+        homeNameKeys: Set<String>
+    ) -> String {
+        let stopNames = intermediateStops
+            .map { $0.displayName }
+            .filter { normalizedPlaceName($0) != normalizedPlaceName("Stopped") }
+
+        let destinationNames = contexts.compactMap { context -> String? in
+            if let stop = context.destinationStop,
+               !isHomeStop(stop, homePlaceIDs: homePlaceIDs, homeNameKeys: homeNameKeys) {
+                let name = stop.displayName
+                return normalizedPlaceName(name) == normalizedPlaceName("Stopped") ? nil : name
+            }
+            if let destinationName = context.destinationName,
+               !homeNameKeys.contains(normalizedPlaceName(destinationName)) {
+                return destinationName
+            }
+            return nil
+        }
+
+        let uniqueNames = uniquePreservingOrder(from: stopNames + destinationNames)
+
+        if contexts.count == 2, let destination = uniqueNames.first {
+            return "Round trip to \(destination)"
+        }
+
+        if uniqueNames.count == 1, let destination = uniqueNames.first {
+            return "Trip to \(destination)"
+        }
+
+        if uniqueNames.count == 2 {
+            return "Trip to \(uniqueNames[0]) & \(uniqueNames[1])"
+        }
+
+        if let primary = uniqueNames.first {
+            return "Trip to \(primary)"
+        }
+
+        if !intermediateStops.isEmpty {
+            let stopCount = intermediateStops.count
+            return "Multi-stop trip (\(stopCount) stop\(stopCount == 1 ? "" : "s"))"
+        }
+
+        return "Drive sequence"
+    }
+
+    private static func uniquePreservingOrder(from values: [String]) -> [String] {
+        var seen: Set<String> = []
+        var ordered: [String] = []
+        ordered.reserveCapacity(values.count)
+
+        for value in values {
+            let key = normalizedPlaceName(value)
+            guard !key.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            ordered.append(value)
+        }
+
+        return ordered
+    }
+
+    private static func isHomeTripStart(
+        _ context: DriveContext,
+        previous: DriveContext?,
+        startsNewDay: Bool,
+        homePlaces: [Place],
+        homePlaceIDs: Set<UUID>,
+        homeNameKeys: Set<String>
+    ) -> Bool {
+        if let previous,
+           isHomeDestination(
+            for: previous,
+            homePlaces: homePlaces,
+            homePlaceIDs: homePlaceIDs,
+            homeNameKeys: homeNameKeys
+           ) {
+            return true
+        }
+
+        if let startCoordinate = context.drive.startCoordinate,
+           homePlaces.contains(where: { $0.contains(startCoordinate) }) {
+            return true
+        }
+
+        // Relaxed first-pass rule:
+        // If this is the first drive we have for the day, allow grouping to start here.
+        // The range still must close back at Home and satisfy stop/duration constraints.
+        if startsNewDay {
+            return true
+        }
+
+        return false
+    }
+
+    private static func isHomeDestination(
+        for context: DriveContext,
+        homePlaces: [Place],
+        homePlaceIDs: Set<UUID>,
+        homeNameKeys: Set<String>
+    ) -> Bool {
+        if let stop = context.destinationStop,
+           isHomeStop(stop, homePlaceIDs: homePlaceIDs, homeNameKeys: homeNameKeys) {
+            return true
+        }
+
+        if let destinationName = context.destinationName,
+           homeNameKeys.contains(normalizedPlaceName(destinationName)) {
+            return true
+        }
+
+        if let endCoordinate = context.drive.endCoordinateSnapshot,
+           homePlaces.contains(where: { $0.contains(endCoordinate) }) {
+            return true
+        }
+
+        return false
+    }
+
+    private static func isHomeStop(
+        _ stop: InferredStop,
+        homePlaceIDs: Set<UUID>,
+        homeNameKeys: Set<String>
+    ) -> Bool {
+        if let place = stop.matchedPlace {
+            if homePlaceIDs.contains(place.placeId) {
+                return true
+            }
+            if homeNameKeys.contains(normalizedPlaceName(place.name)) {
+                return true
+            }
+        }
+
+        return homeNameKeys.contains(normalizedPlaceName(stop.displayName))
+    }
+
+    private static func isHomePlace(_ place: Place) -> Bool {
+        let key = normalizedPlaceName(place.name)
+        if key == "home" {
+            return true
+        }
+
+        if place.icon.contains("house") {
+            return true
+        }
+
+        return false
+    }
+
+    private static func normalizedPlaceName(_ value: String) -> String {
+        let lowered = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lowered.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
     }
 }

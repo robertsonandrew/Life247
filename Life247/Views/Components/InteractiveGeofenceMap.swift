@@ -61,9 +61,12 @@ struct InteractiveGeofenceMap: View {
         ZStack {
             MapReader { proxy in
                 Map(position: $cameraPosition, interactionModes: [.pan, .zoom]) {
-                    // Geofence ring (no fill) to avoid MapCircle fill artifacts.
-                    MapPolyline(coordinates: geofenceRingCoordinates(center: coordinate, radiusMeters: clampedRadiusMeters))
-                        .stroke(.blue, lineWidth: 3)
+                    // Geofence circle (filled + bordered for modern appearance)
+                    MapCircle(center: coordinate, radius: clampedRadiusMeters)
+                        .foregroundStyle(.blue.opacity(0.12))
+                    MapCircle(center: coordinate, radius: clampedRadiusMeters)
+                        .foregroundStyle(.clear)
+                        .stroke(.blue.opacity(0.55), lineWidth: 2)
                     
                     // Center marker
                     Annotation("", coordinate: coordinate) {
@@ -208,28 +211,7 @@ struct InteractiveGeofenceMap: View {
         )
     }
 
-    private func geofenceRingCoordinates(
-        center: CLLocationCoordinate2D,
-        radiusMeters: CLLocationDistance,
-        segments: Int = 180
-    ) -> [CLLocationCoordinate2D] {
-        let clampedSegments = max(72, min(360, segments))
-        let centerPoint = MKMapPoint(center)
-        let pointsPerMeter = MKMapPointsPerMeterAtLatitude(center.latitude)
-        let mapRadius = radiusMeters * pointsPerMeter
 
-        var coordinates: [CLLocationCoordinate2D] = []
-        coordinates.reserveCapacity(clampedSegments + 1)
-
-        for index in 0...clampedSegments {
-            let theta = (Double(index) / Double(clampedSegments)) * 2.0 * .pi
-            let x = centerPoint.x + (mapRadius * cos(theta))
-            let y = centerPoint.y + (mapRadius * sin(theta))
-            coordinates.append(MKMapPoint(x: x, y: y).coordinate)
-        }
-
-        return coordinates
-    }
 }
 
 // MARK: - Preview

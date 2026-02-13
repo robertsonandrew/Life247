@@ -8,6 +8,7 @@
 import SwiftUI
 import MapKit
 import SwiftData
+import Combine
 
 /// Main dashboard displaying the live map.
 /// Uses MapCameraPolicy for camera behavior.
@@ -16,8 +17,9 @@ struct DashboardView: View {
     @ObservedObject var locationManager: LocationManager
     @Binding var selectedHistoryRoute: HistoryRouteSelection?
     @Binding var bottomBarDetent: BottomBarDetent
-    @Query(sort: \Drive.startTime, order: .reverse) private var allDrives: [Drive]
+    @Environment(\.modelContext) private var modelContext
     @Query private var savedPlaces: [Place]
+    @StateObject private var viewModel = DashboardViewModel()
     @AppStorage("defaultZoomLevel") private var defaultZoomLevelRaw: String = MapZoomLevel.area.rawValue
     @AppStorage("showPlacesOnMap") private var showPlacesOnMap = true
     @AppStorage("showPlaceCenterMarkers") private var showPlaceCenterMarkers = false
@@ -34,22 +36,15 @@ struct DashboardView: View {
     @State private var mapPitch: Double = 0
     @State private var mapCenterCoordinate: CLLocationCoordinate2D?
     @GestureState private var isMapPinchActive = false
-    @State private var lastCameraUpdate: Date = .distantPast
-    @State private var lastHeadingCameraUpdate: Date = .distantPast
-    @State private var lastCourseHeading: Double = 0
-    @State private var hasCourseHeading: Bool = false
     @State private var liveResolvedHeading: Double?
     @State private var puckRenderNonce: Int = 0
     @AppStorage("historyTimeSpan") private var historyTimeSpanRaw: String = HistoryTimeSpan.off.rawValue
     @State private var routeCoordinates: [CLLocationCoordinate2D] = []  // Cached for stable polyline
-    @State private var routeRenderNonce: Int = 0
     @State private var lastSyncedRouteDriveId: UUID?
     @State private var lastSyncedRoutePointCount: Int = 0
     @State private var lastSyncedRouteTimestamp: Date?
-    @State private var routeSyncTask: Task<Void, Never>?
     @State private var uniqueMapPlacesCache: [Place] = []
     @State private var showMapStyleSheet = false
-    @State private var interpolator = LocationInterpolator()
     @Namespace private var mapScope
 
     @State private var selectedPlaceForDwell: Place?
@@ -59,10 +54,6 @@ struct DashboardView: View {
     
     // Cache for history routes to prevent re-sorting on every frame
     @State private var historyRouteCache: [UUID: HistoryRoute] = [:]
-    @State private var historyCacheTask: Task<Void, Never>?
-    @State private var routeFocusTask: Task<Void, Never>?
-    @State private var lastFocusedRouteId: UUID?
-    @State private var historyTapCycleState: HistoryRouteTapCycleState?
     
     private var historyTimeSpan: HistoryTimeSpan {
         HistoryTimeSpan(rawValue: historyTimeSpanRaw) ?? .off
@@ -82,6 +73,16 @@ struct DashboardView: View {
     private let routeRefitAnimationDuration: TimeInterval = 0.25
     private let routeFocusMinSpanDelta: Double = 0.004
     private let routeFocusPaddingFactor: Double = 1.22
+    private let activeRouteLineWidth: CGFloat = 6
+    private let routeSyncIntervalNanoseconds: UInt64 = 8_000_000_000
+    private let liveTailMinDistanceMeters: Double = 2
+    private let liveTailMaxDistanceMeters: Double = 1200
+    private let routeWatchdogLagPointThreshold: Int = 4
+    private let routeWatchdogMinLagDurationSeconds: TimeInterval = 4
+    private let routeWatchdogRecoveryCooldownSeconds: TimeInterval = 8
+    private let freeModeAutoRecenterGraceSeconds: TimeInterval = 6
+    private let freeModeAutoRecenterMinDistanceMeters: Double = 35
+    private let freeModeAutoRecenterMaxDistanceMeters: Double = 90
     private let maxHistoryOverlayPointsPerRoute: Int = 800
     private let maxHistoryHitTestPointsPerRoute: Int = 2400
     private let historyRouteDimmedOpacityMultiplier: Double = 0.42
@@ -132,43 +133,22 @@ struct DashboardView: View {
     }
 
     private struct PlaceCircleStyle {
+        let fillOpacity: Double
         let strokeOpacity: Double
         let strokeWidth: CGFloat
-        let haloOpacity: Double
-        let haloWidth: CGFloat
     }
 
     private var placeCircleStyle: PlaceCircleStyle {
-        // Stroke-only rendering avoids SwiftUI MapCircle fill artifacts on some render passes.
+        // Filled + bordered rendering matches Apple/Google Maps geofence conventions.
         switch cameraDistance {
         case ..<1200:
-            return PlaceCircleStyle(
-                strokeOpacity: 0.82,
-                strokeWidth: 2.1,
-                haloOpacity: 0.24,
-                haloWidth: 4.2
-            )
+            return PlaceCircleStyle(fillOpacity: 0.14, strokeOpacity: 0.55, strokeWidth: 2.0)
         case ..<5000:
-            return PlaceCircleStyle(
-                strokeOpacity: 0.68,
-                strokeWidth: 1.8,
-                haloOpacity: 0.18,
-                haloWidth: 3.3
-            )
+            return PlaceCircleStyle(fillOpacity: 0.10, strokeOpacity: 0.45, strokeWidth: 1.5)
         case ..<18000:
-            return PlaceCircleStyle(
-                strokeOpacity: 0.52,
-                strokeWidth: 1.5,
-                haloOpacity: 0.12,
-                haloWidth: 2.4
-            )
+            return PlaceCircleStyle(fillOpacity: 0.08, strokeOpacity: 0.35, strokeWidth: 1.2)
         default:
-            return PlaceCircleStyle(
-                strokeOpacity: 0.40,
-                strokeWidth: 1.1,
-                haloOpacity: 0.08,
-                haloWidth: 1.8
-            )
+            return PlaceCircleStyle(fillOpacity: 0.05, strokeOpacity: 0.25, strokeWidth: 1.0)
         }
     }
 
@@ -183,6 +163,22 @@ struct DashboardView: View {
 
     private var canSelectHistoryRoutes: Bool {
         !isDriveInteractionLocked && historyTimeSpan != .off && !historyRouteCache.isEmpty
+    }
+
+    private func isDrivingLike(_ state: DriveState) -> Bool {
+        state == .driving || state == .maybeDriving
+    }
+
+    private func isRouteSyncState(_ state: DriveState) -> Bool {
+        isDrivingLike(state) || state == .stopped || state == .pendingArrival
+    }
+
+    private func isLiveTailState(_ state: DriveState) -> Bool {
+        state == .driving || state == .stopped || state == .pendingArrival
+    }
+
+    private var cameraRuntime: DashboardCameraRuntime {
+        viewModel.cameraRuntime
     }
     
     private var shouldShowCompassControl: Bool {
@@ -243,20 +239,6 @@ struct DashboardView: View {
     
     // Camera updates are driven directly by stateMachine.currentLocation.
     // Puck/cone rendering uses a custom annotation to keep icon + cone in sync.
-    
-    // Filtered drives for history overlay (derived from state)
-    private var historyDrives: [Drive] {
-        guard let windowStart = historyTimeSpan.windowStart else { return [] }
-        let now = Date()
-        
-        return allDrives.filter { drive in
-            // Exclude active drive
-            guard drive.id != stateMachine.activeDrive?.id else { return false }
-            // Intersection query: drive overlaps with time window
-            guard let endTime = drive.endTime else { return false }
-            return endTime >= windowStart && drive.startTime <= now
-        }
-    }
     
     /// The place where active dwell is happening.
     /// Uses name+proximity first to heal duplicate-place drift, then placeId fallback.
@@ -455,7 +437,7 @@ struct DashboardView: View {
         dashboardContentWithCoreChanges
             .onChange(of: bottomBarDetent) { oldDetent, newDetent in
                 guard let selection = selectedHistoryRoute else { return }
-                guard routeFocusTask == nil else { return }
+                guard viewModel.routeFocusTask == nil else { return }
                 guard newDetent.rawValue > oldDetent.rawValue else { return }
                 focusCamera(
                     on: selection.id,
@@ -467,16 +449,8 @@ struct DashboardView: View {
             .onChange(of: selectedHistoryRoute?.id) { _, newId in
                 if newId == nil {
                     cancelRouteFocusTask()
-                    lastFocusedRouteId = nil
-                    historyTapCycleState = nil
-                }
-            }
-            .onChange(of: isVisible) { _, visible in
-                if !visible {
-                    cancelHistoryCacheTask()
-                    cancelRouteFocusTask()
-                    historyTapCycleState = nil
-                    stopRouteSyncTask()
+                    viewModel.lastFocusedRouteId = nil
+                    viewModel.historyTapCycleState = nil
                 }
             }
     }
@@ -492,35 +466,44 @@ struct DashboardView: View {
                 mapStyleSheet
             }
             .onAppear { handleOnAppear() }
+            .onDisappear {
+                cancelHistoryCacheTask()
+                cancelRouteFocusTask()
+                viewModel.historyTapCycleState = nil
+                stopRouteSyncTask()
+                resetRouteWatchdogState()
+            }
             .onChange(of: isVisible) { _, visible in
                 if visible {
                     puckRenderNonce &+= 1
                     if isHeadingTrackingMode {
                         primeHeadingConeIfNeeded()
                     }
-                    if let location = stateMachine.currentLocation {
-                        interpolator.receive(location)
-                    }
                     syncActiveRoutePoints(force: true)
                     updateHistoryCache()
                     startRouteSyncTaskIfNeeded()
                 } else {
-                    interpolator.stop()
+                    cancelHistoryCacheTask()
+                    cancelRouteFocusTask()
+                    viewModel.historyTapCycleState = nil
                     stopRouteSyncTask()
+                    resetRouteWatchdogState()
                 }
             }
             // Use .task for route initialization - runs before first render, guaranteed
             .task { if isVisible { initializeRouteCacheFromActiveDrive() } }
             .onChange(of: stateMachine.currentLocation) { _, newLocation in
                 guard isVisible else { return }
-                syncActiveRoutePoints()
+                // Route sync is driven by routePointVersion updates.
+                // A periodic task + watchdog remain as safety nets.
                 handleLocationChange(newLocation)
             }
             .onChange(of: savedPlacesSignature) { _, _ in
                 updateUniqueMapPlacesCache()
             }
             .onChange(of: stateMachine.routePointVersion) { _, _ in
-                syncActiveRoutePoints(force: true)
+                guard isVisible else { return }
+                syncActiveRoutePoints()
             }
             .onChange(of: stateMachine.activeDrive?.id) { _, _ in
                 syncActiveRoutePoints(force: true)
@@ -546,13 +529,13 @@ struct DashboardView: View {
                 guard isVisible else { return }
                 handleZoomSettingChange()
             }
-            // Update history cache when history span changes or drives change
+            // Update history cache when history span changes.
             .onChange(of: historyTimeSpan) { _, _ in
                 if isVisible {
                     updateHistoryCache()
                 }
             }
-            .onChange(of: allDrives.count) { _, _ in
+            .onReceive(NotificationCenter.default.publisher(for: .driveEnded)) { _ in
                 if isVisible {
                     updateHistoryCache()
                 }
@@ -593,9 +576,21 @@ struct DashboardView: View {
                 // Keep heading/follow active while pinching, matching common navigation UX.
                 guard !isMapPinchActive else { return }
                 let translation = hypot(value.translation.width, value.translation.height)
-                guard translation > 22 else { return }
-                guard trackingMode != .free else { return }
-                trackingMode = .free
+                let disengageThreshold: CGFloat = isDrivingLike(stateMachine.state) ? 48 : 22
+                guard translation > disengageThreshold else { return }
+                if trackingMode != .free {
+                    let previousMode = trackingMode
+                    trackingMode = .free
+                    logMapTrackingEvent(
+                        type: "map_follow_disengaged_pan",
+                        message: "Map follow disengaged by pan",
+                        metadata: [
+                            "fromMode": trackingModeLabel(previousMode),
+                            "threshold": String(format: "%.0f", disengageThreshold)
+                        ]
+                    )
+                }
+                cameraRuntime.lastManualTrackingDisengageAt = Date()
             }
     }
     
@@ -631,8 +626,9 @@ struct DashboardView: View {
     private var mapContent: some MapContent {
         placesContent
         historyContent
-        puckContent
+        // Draw route beneath puck so the vehicle marker/cone is always top-most.
         routeContent
+        puckContent
     }
     
     /// Places layer - circles and annotations
@@ -656,50 +652,21 @@ struct DashboardView: View {
     }
     
     /// Geofence circles with zoom-adaptive styling.
+    /// Uses MapCircle with soft fill + clean border (Apple/Google Maps convention).
     @MapContentBuilder
     private func placeCircle(for place: Place) -> some MapContent {
         let style = placeCircleStyle
         let color = placeColor(for: place.icon)
         let displayRadius = place.clampedRadiusMeters
         let isActivePlace = activeDwellPlace?.id == place.id
-        let activeRingRadius = displayRadius + max(8, min(displayRadius * 0.05, 20))
-        let ringCoordinates = geofenceRingCoordinates(center: place.coordinate, radiusMeters: displayRadius)
-        let activeRingCoordinates = geofenceRingCoordinates(center: place.coordinate, radiusMeters: activeRingRadius)
 
-        MapPolyline(coordinates: ringCoordinates)
-            .stroke(color.opacity(style.haloOpacity), lineWidth: style.haloWidth)
-        MapPolyline(coordinates: ringCoordinates)
-            .stroke(color.opacity(style.strokeOpacity), lineWidth: style.strokeWidth)
-        
-        if isActivePlace {
-            MapPolyline(coordinates: activeRingCoordinates)
-                .stroke(color.opacity(0.50), lineWidth: 1.2)
-        }
-    }
-
-    /// Build a closed circle ring as coordinates and render via MapPolyline.
-    /// This avoids MapCircle fill artifacts seen on some SwiftUI Map render passes.
-    private func geofenceRingCoordinates(
-        center: CLLocationCoordinate2D,
-        radiusMeters: CLLocationDistance,
-        segments: Int = 96
-    ) -> [CLLocationCoordinate2D] {
-        let clampedSegments = max(24, min(192, segments))
-        let centerPoint = MKMapPoint(center)
-        let pointsPerMeter = MKMapPointsPerMeterAtLatitude(center.latitude)
-        let mapRadius = radiusMeters * pointsPerMeter
-
-        var coordinates: [CLLocationCoordinate2D] = []
-        coordinates.reserveCapacity(clampedSegments + 1)
-
-        for index in 0...clampedSegments {
-            let theta = (Double(index) / Double(clampedSegments)) * 2.0 * .pi
-            let x = centerPoint.x + (mapRadius * cos(theta))
-            let y = centerPoint.y + (mapRadius * sin(theta))
-            coordinates.append(MKMapPoint(x: x, y: y).coordinate)
-        }
-
-        return coordinates
+        // Soft fill
+        MapCircle(center: place.coordinate, radius: displayRadius)
+            .foregroundStyle(color.opacity(isActivePlace ? style.fillOpacity * 1.6 : style.fillOpacity))
+        // Clean border
+        MapCircle(center: place.coordinate, radius: displayRadius)
+            .foregroundStyle(.clear)
+            .stroke(color.opacity(isActivePlace ? style.strokeOpacity * 1.3 : style.strokeOpacity), lineWidth: style.strokeWidth)
     }
 
     private func placeCenterMarker(for place: Place) -> some MapContent {
@@ -720,35 +687,37 @@ struct DashboardView: View {
     /// History routes layer
     @MapContentBuilder
     private var historyContent: some MapContent {
-        let selectedId = selectedHistoryRoute?.id
-        let sortedRoutes = historyRouteCache.sorted { $0.value.endTime < $1.value.endTime }
-        let indexedRoutes = Array(sortedRoutes.enumerated())
-        
-        ForEach(indexedRoutes, id: \.element.key) { indexedRoute in
-            let driveId = indexedRoute.element.key
-            let route = indexedRoute.element.value
-            if driveId != selectedId {
-                let hue = historyRouteHue(for: indexedRoute.offset, total: sortedRoutes.count)
-                let baseOpacity = historyRouteOpacity(for: route.endTime)
-                let opacity = selectedId == nil
-                    ? baseOpacity
-                    : max(0.10, baseOpacity * historyRouteDimmedOpacityMultiplier)
-                MapPolyline(coordinates: route.coordinates)
-                    .stroke(historyRouteColor(hue: hue, opacity: opacity), lineWidth: 5)
-            }
-        }
-        
-        if let selectedId,
-           let indexedRoute = indexedRoutes.first(where: { $0.element.key == selectedId }) {
-            let hue = historyRouteHue(for: indexedRoute.offset, total: sortedRoutes.count)
-            let route = indexedRoute.element.value
-            let baseColor = historyRouteColor(hue: hue, opacity: 1.0)
+        if !isDriveInteractionLocked, historyTimeSpan != .off, !historyRouteCache.isEmpty {
+            let selectedId = selectedHistoryRoute?.id
+            let sortedRoutes = historyRouteCache.sorted { $0.value.endTime < $1.value.endTime }
+            let indexedRoutes = Array(sortedRoutes.enumerated())
             
-            // Static glow (MapContent doesn't support animation modifiers)
-            MapPolyline(coordinates: route.coordinates)
-                .stroke(baseColor.opacity(0.30), lineWidth: 14)
-            MapPolyline(coordinates: route.coordinates)
-                .stroke(baseColor.opacity(0.96), lineWidth: 8)
+            ForEach(indexedRoutes, id: \.element.key) { indexedRoute in
+                let driveId = indexedRoute.element.key
+                let route = indexedRoute.element.value
+                if driveId != selectedId {
+                    let hue = historyRouteHue(for: indexedRoute.offset, total: sortedRoutes.count)
+                    let baseOpacity = historyRouteOpacity(for: route.endTime)
+                    let opacity = selectedId == nil
+                        ? baseOpacity
+                        : max(0.10, baseOpacity * historyRouteDimmedOpacityMultiplier)
+                    MapPolyline(coordinates: route.coordinates)
+                        .stroke(historyRouteColor(hue: hue, opacity: opacity), lineWidth: 5)
+                }
+            }
+            
+            if let selectedId,
+               let indexedRoute = indexedRoutes.first(where: { $0.element.key == selectedId }) {
+                let hue = historyRouteHue(for: indexedRoute.offset, total: sortedRoutes.count)
+                let route = indexedRoute.element.value
+                let baseColor = historyRouteColor(hue: hue, opacity: 1.0)
+                
+                // Static glow (MapContent doesn't support animation modifiers)
+                MapPolyline(coordinates: route.coordinates)
+                    .stroke(baseColor.opacity(0.30), lineWidth: 14)
+                MapPolyline(coordinates: route.coordinates)
+                    .stroke(baseColor.opacity(0.96), lineWidth: 8)
+            }
         }
     }
     
@@ -765,16 +734,15 @@ struct DashboardView: View {
             }
 
             // Render puck + cone in one annotation view so they stay phase-aligned.
-            let coneCoordinate = interpolator.displayCoordinate ?? stateMachine.currentLocation?.coordinate
+            let coneCoordinate = livePuckCoordinate
             let showCone = isHeadingTrackingMode
-            let rawSpeed = stateMachine.currentLocation?.speed ?? 0
-            let speedMPS = max(0, interpolator.displaySpeed > 0 ? interpolator.displaySpeed : rawSpeed)
+            let speedMPS = max(0, stateMachine.currentLocation?.speed ?? 0)
             if let coordinate = coneCoordinate {
                 // In heading modes, pin cone to displayed map heading to avoid left/right wobble
                 // caused by camera-rotation lag vs. raw course updates.
                 let headingValue: Double = showCone
                     ? normalizeHeading(mapHeading)
-                    : (liveResolvedHeading ?? interpolator.displayHeading)
+                    : (liveResolvedHeading ?? normalizeHeading(mapHeading))
                 let annotationKey = "puck-\(showCone ? "heading" : "follow")-\(puckRenderNonce)"
                 if showCone {
                     Annotation(annotationKey, coordinate: coordinate, anchor: .center) {
@@ -806,14 +774,41 @@ struct DashboardView: View {
     }
     
     /// Active drive route layer
+    /// Renders MapPolyline directly without identity wrappers (ForEach/nonce).
+    /// SwiftUI Map updates the overlay in-place when routeCoordinates changes via @State.
+    /// Using ForEach([nonce]) caused overlay destroy-recreate cycles that made the
+    /// polyline silently disappear on MKMapView during the transition window.
     @MapContentBuilder
     private var routeContent: some MapContent {
         if routeCoordinates.count > 1 {
-            ForEach([routeRenderNonce], id: \.self) { _ in
-                MapPolyline(coordinates: routeCoordinates)
-                    .stroke(.blue, lineWidth: 6)
-            }
+            MapPolyline(coordinates: routeCoordinates)
+                .stroke(.blue, lineWidth: activeRouteLineWidth)
         }
+
+        if let liveTailCoordinates {
+            // Bridge temporary gaps between accepted route points and live puck position.
+            // This prevents apparent "route cutoff" when persistence/filters lag briefly.
+            MapPolyline(coordinates: liveTailCoordinates)
+                .stroke(.blue, lineWidth: activeRouteLineWidth)
+        }
+    }
+
+    private var liveTailCoordinates: [CLLocationCoordinate2D]? {
+        guard isLiveTailState(stateMachine.state) else { return nil }
+        guard let routeTail = routeCoordinates.last else { return nil }
+        guard let live = livePuckCoordinate else { return nil }
+
+        let distance = centerDistanceMeters(from: routeTail, to: live)
+        guard distance >= liveTailMinDistanceMeters else { return nil }
+        guard distance <= liveTailMaxDistanceMeters else { return nil }
+
+        return [routeTail, live]
+    }
+
+    /// Shared live coordinate source used by both puck and live-tail rendering.
+    /// Intentionally uses raw GPS cadence to avoid display-link frequency map-content churn.
+    private var livePuckCoordinate: CLLocationCoordinate2D? {
+        stateMachine.currentLocation?.coordinate
     }
     
     /// Minimal active-place marker used only to anchor dwell bubble (no place icon).
@@ -873,7 +868,7 @@ struct DashboardView: View {
         return VStack {
             // Top row: Speed HUD (visible when driving)
             HStack {
-                if stateMachine.state == .driving || stateMachine.state == .maybeDriving {
+                if isDrivingLike(stateMachine.state) {
                     SpeedHUD(speed: stateMachine.currentSpeedMPH)  // Already in MPH from stateMachine
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
@@ -963,12 +958,6 @@ struct DashboardView: View {
         syncActiveRoutePoints(force: true)
         startRouteSyncTaskIfNeeded()
         if let location = stateMachine.currentLocation {
-            interpolator.receive(location)
-        }
-        if let heading = locationManager.currentHeading {
-            interpolator.receiveHeading(heading)
-        }
-        if let location = stateMachine.currentLocation {
             let age = Date().timeIntervalSince(location.timestamp)
             // Only use fresh locations for initial camera (avoid stale home cache)
             if age <= 12.0 {
@@ -977,7 +966,7 @@ struct DashboardView: View {
         }
         
         // Force drivingView if we recovered into an active driving state
-        if stateMachine.state == .driving || stateMachine.state == .maybeDriving {
+        if isDrivingLike(stateMachine.state) {
             trackingMode = .drivingView
         }
     }
@@ -989,15 +978,23 @@ struct DashboardView: View {
     private func handleLocationChange(_ newLocation: CLLocation?) {
         guard let location = newLocation else { return }
 
-        // Feed interpolator for 60fps puck smoothing while preserving raw GPS for drive logic.
-        interpolator.receive(location)
-
         let heading = refreshResolvedHeading(for: location)
         
         // Update camera directly from GPS location (no interpolator needed)
         if trackingMode != .free {
             updateCameraFromLocation(location: location, heading: heading)
+        } else {
+            maybeAutoReengageTracking(location: location, heading: heading)
         }
+
+        ensureRenderedRouteIsCurrent()
+
+        // Route updates are primarily driven by routePointVersion events.
+        // The periodic task/watchdog are safety nets if that signal is missed.
+        // If route updates lag behind live tracking,
+        // recover in-place without requiring a tab switch.
+        startRouteSyncTaskIfNeeded()
+        monitorRouteSyncHealth(currentLocation: location)
 
         updateSoftDwellIfNeeded(currentLocation: location)
     }
@@ -1005,18 +1002,15 @@ struct DashboardView: View {
     private func handleHeadingChange(_ newHeading: CLHeading?) {
         guard trackingMode == .followWithHeading || trackingMode == .drivingView else { return }
         guard newHeading != nil, let location = stateMachine.currentLocation else { return }
-        if let newHeading {
-            interpolator.receiveHeading(newHeading)
-        }
 
         let now = Date()
-        guard now.timeIntervalSince(lastHeadingCameraUpdate) >= minHeadingUpdateInterval else { return }
+        guard now.timeIntervalSince(cameraRuntime.lastHeadingCameraUpdate) >= minHeadingUpdateInterval else { return }
 
         let heading = refreshResolvedHeading(for: location)
         let delta = abs(shortestAngleDelta(from: mapHeading, to: heading))
         guard delta >= headingUpdateThresholdDegrees else { return }
 
-        lastHeadingCameraUpdate = now
+        cameraRuntime.lastHeadingCameraUpdate = now
         updateCameraForHeadingChange(location: location, heading: heading)
     }
 
@@ -1084,7 +1078,6 @@ struct DashboardView: View {
     private func applyRouteCoordinates(_ newCoordinates: [CLLocationCoordinate2D]) {
         guard shouldReplaceRouteCoordinates(with: newCoordinates) else { return }
         routeCoordinates = newCoordinates
-        routeRenderNonce &+= 1
     }
 
     private func shouldReplaceRouteCoordinates(with newCoordinates: [CLLocationCoordinate2D]) -> Bool {
@@ -1106,16 +1099,13 @@ struct DashboardView: View {
     }
 
     private func startRouteSyncTaskIfNeeded() {
-        guard routeSyncTask == nil else { return }
+        guard viewModel.routeSyncTask == nil else { return }
         guard isVisible else { return }
-        guard stateMachine.state == .driving ||
-                stateMachine.state == .maybeDriving ||
-                stateMachine.state == .stopped ||
-                stateMachine.state == .pendingArrival else { return }
+        guard isRouteSyncState(stateMachine.state) else { return }
 
-        routeSyncTask = Task {
+        viewModel.routeSyncTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                try? await Task.sleep(nanoseconds: routeSyncIntervalNanoseconds)
                 await MainActor.run {
                     syncActiveRoutePoints(force: true)
                 }
@@ -1124,28 +1114,114 @@ struct DashboardView: View {
     }
 
     private func stopRouteSyncTask() {
-        routeSyncTask?.cancel()
-        routeSyncTask = nil
+        viewModel.routeSyncTask?.cancel()
+        viewModel.routeSyncTask = nil
+    }
+
+    private func resetRouteWatchdogState() {
+        viewModel.routeLagBeganAt = nil
+    }
+
+    private func monitorRouteSyncHealth(currentLocation: CLLocation) {
+        guard isVisible, isRouteSyncState(stateMachine.state) else {
+            resetRouteWatchdogState()
+            return
+        }
+
+        let liveCount = stateMachine.activeRouteCoordinates.count
+        let lag = liveCount - routeCoordinates.count
+
+        guard lag > 0 else {
+            resetRouteWatchdogState()
+            return
+        }
+
+        if viewModel.routeLagBeganAt == nil {
+            viewModel.routeLagBeganAt = Date()
+        }
+
+        guard let lagStart = viewModel.routeLagBeganAt else { return }
+        let now = Date()
+        let lagDuration = now.timeIntervalSince(lagStart)
+        let cooldownElapsed = now.timeIntervalSince(viewModel.lastRouteWatchdogRecoveryAt)
+
+        guard lag >= routeWatchdogLagPointThreshold,
+              lagDuration >= routeWatchdogMinLagDurationSeconds,
+              cooldownElapsed >= routeWatchdogRecoveryCooldownSeconds else {
+            return
+        }
+
+        let staleSeconds = Int(lagDuration.rounded())
+        syncActiveRoutePoints(force: true)
+        viewModel.lastRouteWatchdogRecoveryAt = now
+        resetRouteWatchdogState()
+        logMapTrackingEvent(
+            type: "map_route_watchdog_resync",
+            message: "Route watchdog forced resync after lag",
+            metadata: [
+                "lagPoints": String(lag),
+                "lagSeconds": String(staleSeconds)
+            ]
+        )
+    }
+
+    private func ensureRenderedRouteIsCurrent() {
+        guard isRouteSyncState(stateMachine.state) else { return }
+        let live = stateMachine.activeRouteCoordinates
+        guard !live.isEmpty else { return }
+
+        let countDiffers = live.count != routeCoordinates.count
+        let tailDiffers: Bool
+        if let liveTail = live.last, let renderedTail = routeCoordinates.last {
+            tailDiffers = abs(liveTail.latitude - renderedTail.latitude) > 0.0000001 ||
+                abs(liveTail.longitude - renderedTail.longitude) > 0.0000001
+        } else {
+            tailDiffers = routeCoordinates.last != nil
+        }
+
+        if countDiffers || tailDiffers {
+            syncActiveRoutePoints()
+        }
     }
 
     private func handleDriveStateChange(from _: DriveState, to newState: DriveState) {
-        if newState == .driving || newState == .maybeDriving || newState == .stopped || newState == .pendingArrival {
+        if isRouteSyncState(newState) {
             selectedHistoryRoute = nil
             startRouteSyncTaskIfNeeded()
         } else {
             stopRouteSyncTask()
         }
 
-        if newState == .driving || newState == .maybeDriving {
+        if isDrivingLike(newState) {
             // Auto-rotate map when driving (if user hasn't panned away)
             if trackingMode == .follow {
+                let previousMode = trackingMode
                 trackingMode = .followWithHeading
+                logMapTrackingEvent(
+                    type: "map_tracking_mode_auto",
+                    message: "Auto-switched tracking mode on drive state change",
+                    metadata: [
+                        "fromMode": trackingModeLabel(previousMode),
+                        "toMode": trackingModeLabel(trackingMode),
+                        "state": newState.rawValue
+                    ]
+                )
                 if let location = stateMachine.currentLocation {
                     updateCamera(for: location)
                 }
             } else if trackingMode == .free {
                 // Enter driving camera automatically when a drive begins from free mode.
+                let previousMode = trackingMode
                 trackingMode = .drivingView
+                logMapTrackingEvent(
+                    type: "map_tracking_mode_auto",
+                    message: "Auto-switched tracking mode on drive state change",
+                    metadata: [
+                        "fromMode": trackingModeLabel(previousMode),
+                        "toMode": trackingModeLabel(trackingMode),
+                        "state": newState.rawValue
+                    ]
+                )
                 if let location = stateMachine.currentLocation {
                     updateCamera(for: location)
                 }
@@ -1345,7 +1421,7 @@ struct DashboardView: View {
             cameraPosition = .camera(camera)
         }
         
-        lastCameraUpdate = Date()
+        cameraRuntime.lastCameraUpdate = Date()
     }
     
     /// Camera update driven by GPS location directly (no interpolator)
@@ -1400,6 +1476,39 @@ struct DashboardView: View {
             cameraPosition = .camera(camera)
         }
     }
+
+    private func maybeAutoReengageTracking(location: CLLocation, heading: Double) {
+        guard trackingMode == .free else { return }
+        guard isDrivingLike(stateMachine.state) else { return }
+        guard let mapCenterCoordinate else { return }
+
+        if let disengagedAt = cameraRuntime.lastManualTrackingDisengageAt,
+           Date().timeIntervalSince(disengagedAt) < freeModeAutoRecenterGraceSeconds {
+            return
+        }
+
+        let driftMeters = centerDistanceMeters(from: mapCenterCoordinate, to: location.coordinate)
+        let speedMPS = max(0, location.speed)
+        let dynamicThreshold = min(
+            freeModeAutoRecenterMaxDistanceMeters,
+            max(freeModeAutoRecenterMinDistanceMeters, speedMPS * 5.0)
+        )
+        guard driftMeters >= dynamicThreshold else { return }
+
+        let previousMode = trackingMode
+        trackingMode = .drivingView
+        cameraRuntime.lastManualTrackingDisengageAt = nil
+        logMapTrackingEvent(
+            type: "map_follow_auto_reengage",
+            message: "Auto re-engaged map follow while driving",
+            metadata: [
+                "fromMode": trackingModeLabel(previousMode),
+                "driftMeters": String(format: "%.1f", driftMeters),
+                "thresholdMeters": String(format: "%.1f", dynamicThreshold)
+            ]
+        )
+        updateCameraFromLocation(location: location, heading: heading)
+    }
     
     // MARK: - Tracking Mode
     
@@ -1420,30 +1529,72 @@ struct DashboardView: View {
         case .drivingView: return .mint
         }
     }
+
+    private func trackingModeLabel(_ mode: MapTrackingMode) -> String {
+        switch mode {
+        case .free: return "free"
+        case .follow: return "follow"
+        case .followWithHeading: return "followWithHeading"
+        case .drivingView: return "drivingView"
+        }
+    }
+
+    private func logMapTrackingEvent(
+        type: String,
+        message: String,
+        metadata: [String: String] = [:]
+    ) {
+        guard isDrivingLike(stateMachine.state) else { return }
+        stateMachine.logMapTrackingEvent(type: type, message: message, metadata: metadata)
+    }
     
     private func handleLocationButtonTap() {
-        let isDrivingLikeState = stateMachine.state == .driving || stateMachine.state == .maybeDriving
+        let isDrivingLikeState = isDrivingLike(stateMachine.state)
+        let previousMode = trackingMode
 
         withAnimation {
             switch trackingMode {
             case .free:
                 // From free → follow (center on user)
                 trackingMode = .follow
+                cameraRuntime.lastManualTrackingDisengageAt = nil
             case .follow:
                 // From follow → heading (rotate map with direction)
                 trackingMode = .followWithHeading
+                cameraRuntime.lastManualTrackingDisengageAt = nil
             case .followWithHeading:
                 if isDrivingLikeState {
                     // From heading → cinematic driving view
                     trackingMode = .drivingView
+                    cameraRuntime.lastManualTrackingDisengageAt = nil
                 } else {
                     // From heading → back to free (exit tracking)
                     trackingMode = .free
+                    cameraRuntime.lastManualTrackingDisengageAt = Date()
                 }
             case .drivingView:
-                // If somehow in drivingView, go back to free
-                trackingMode = .free
+                // Keep tap-cycle in tracking modes while actively driving.
+                // Free mode remains available via intentional map pan.
+                if isDrivingLikeState {
+                    trackingMode = .follow
+                    cameraRuntime.lastManualTrackingDisengageAt = nil
+                } else {
+                    trackingMode = .free
+                    cameraRuntime.lastManualTrackingDisengageAt = Date()
+                }
             }
+        }
+
+        if trackingMode != previousMode {
+            logMapTrackingEvent(
+                type: "map_tracking_mode_button",
+                message: "Tracking mode changed via location button",
+                metadata: [
+                    "fromMode": trackingModeLabel(previousMode),
+                    "toMode": trackingModeLabel(trackingMode),
+                    "drivingState": stateMachine.state.rawValue
+                ]
+            )
         }
 
         primeHeadingConeIfNeeded()
@@ -1494,19 +1645,19 @@ struct DashboardView: View {
         }
 
         guard let target else {
-            return hasCourseHeading ? lastCourseHeading : 0
+            return cameraRuntime.hasCourseHeading ? cameraRuntime.lastCourseHeading : 0
         }
 
-        if !hasCourseHeading {
-            lastCourseHeading = target.heading
-            hasCourseHeading = true
+        if !cameraRuntime.hasCourseHeading {
+            cameraRuntime.lastCourseHeading = target.heading
+            cameraRuntime.hasCourseHeading = true
         } else {
-            let delta = shortestAngleDelta(from: lastCourseHeading, to: target.heading)
+            let delta = shortestAngleDelta(from: cameraRuntime.lastCourseHeading, to: target.heading)
             let alpha = target.source == .course ? headingSmoothingAlphaCourse : headingSmoothingAlphaCompass
-            lastCourseHeading = normalizeHeading(lastCourseHeading + alpha * delta)
+            cameraRuntime.lastCourseHeading = normalizeHeading(cameraRuntime.lastCourseHeading + alpha * delta)
         }
 
-        return lastCourseHeading
+        return cameraRuntime.lastCourseHeading
     }
 
     @discardableResult
@@ -1569,21 +1720,21 @@ struct DashboardView: View {
     private func updateHistoryCache() {
         cancelHistoryCacheTask()
         // Run as one cancellable task to avoid overlapping heavy cache builds.
-        historyCacheTask = Task { @MainActor in
-            defer { historyCacheTask = nil }
+        viewModel.historyCacheTask = Task { @MainActor in
+            defer { viewModel.historyCacheTask = nil }
             guard let windowStart = historyTimeSpan.windowStart else {
                 historyRouteCache = [:]
                 selectedHistoryRoute = nil
-                historyTapCycleState = nil
+                viewModel.historyTapCycleState = nil
                 return
             }
             
             let now = Date()
-            // Filter drives first
-            let drivesToCache = allDrives.filter { drive in
-                guard drive.id != stateMachine.activeDrive?.id else { return false }
-                guard let endTime = drive.endTime else { return false }
-                return endTime >= windowStart && drive.startTime <= now
+            guard let drivesToCache = fetchHistoryDrives(windowStart: windowStart, now: now) else {
+                historyRouteCache = [:]
+                selectedHistoryRoute = nil
+                viewModel.historyTapCycleState = nil
+                return
             }
             
             var newCache: [UUID: HistoryRoute] = [:]
@@ -1611,14 +1762,33 @@ struct DashboardView: View {
             
             if let selected = selectedHistoryRoute, newCache[selected.id] == nil {
                 selectedHistoryRoute = nil
-                historyTapCycleState = nil
+                viewModel.historyTapCycleState = nil
             }
         }
     }
 
+    private func fetchHistoryDrives(windowStart: Date, now: Date) -> [Drive]? {
+        let activeDriveId = stateMachine.activeDrive?.id
+        let distantPast = Date.distantPast
+        let descriptor = FetchDescriptor<Drive>(
+            predicate: #Predicate<Drive> { drive in
+                (drive.endTime ?? distantPast) >= windowStart && drive.startTime <= now
+            },
+            sortBy: [SortDescriptor(\Drive.startTime, order: .reverse)]
+        )
+
+        do {
+            let fetched = try modelContext.fetch(descriptor)
+            guard let activeDriveId else { return fetched }
+            return fetched.filter { $0.id != activeDriveId }
+        } catch {
+            return nil
+        }
+    }
+
     private func cancelHistoryCacheTask() {
-        historyCacheTask?.cancel()
-        historyCacheTask = nil
+        viewModel.historyCacheTask?.cancel()
+        viewModel.historyCacheTask = nil
     }
 
     private func downsampleHistoryOverlayCoordinates(
@@ -1717,7 +1887,7 @@ struct DashboardView: View {
         guard let selection = buildHistorySelection(for: selectedId) else {
             cancelRouteFocusTask()
             selectedHistoryRoute = nil
-            historyTapCycleState = nil
+            viewModel.historyTapCycleState = nil
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 bottomBarDetent = .peek
             }
@@ -1725,7 +1895,7 @@ struct DashboardView: View {
         }
 
         // Same-route retap: re-fit immediately with a short animation.
-        if selectedHistoryRoute?.id == selectedId || lastFocusedRouteId == selectedId {
+        if selectedHistoryRoute?.id == selectedId || viewModel.lastFocusedRouteId == selectedId {
             cancelRouteFocusTask()
             trackingMode = .free
             selectedHistoryRoute = selection
@@ -1747,8 +1917,8 @@ struct DashboardView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             bottomBarDetent = .medium
         }
-        routeFocusTask = Task { @MainActor in
-            defer { routeFocusTask = nil }
+        viewModel.routeFocusTask = Task { @MainActor in
+            defer { viewModel.routeFocusTask = nil }
             try? await Task.sleep(nanoseconds: routeFocusSheetFirstDelayMs * 1_000_000)
             guard !Task.isCancelled else { return }
             guard selectedHistoryRoute?.id == selectedId else { return }
@@ -1762,8 +1932,8 @@ struct DashboardView: View {
     }
 
     private func cancelRouteFocusTask() {
-        routeFocusTask?.cancel()
-        routeFocusTask = nil
+        viewModel.routeFocusTask?.cancel()
+        viewModel.routeFocusTask = nil
     }
 
     private func routeOcclusionBias(for detent: BottomBarDetent) -> Double {
@@ -1840,7 +2010,7 @@ struct DashboardView: View {
         } else {
             applyCamera()
         }
-        lastFocusedRouteId = routeId
+        viewModel.lastFocusedRouteId = routeId
     }
     
     private func historyRouteCandidates(
@@ -1890,7 +2060,7 @@ struct DashboardView: View {
         thresholdMeters: Double
     ) -> UUID? {
         guard !candidates.isEmpty else {
-            historyTapCycleState = nil
+            viewModel.historyTapCycleState = nil
             return nil
         }
 
@@ -1898,7 +2068,7 @@ struct DashboardView: View {
         let now = Date()
 
         guard topIds.count == 2 else {
-            historyTapCycleState = nil
+            viewModel.historyTapCycleState = nil
             return topIds.first
         }
 
@@ -1907,7 +2077,7 @@ struct DashboardView: View {
             thresholdMeters * 0.45
         )
 
-        if var cycleState = historyTapCycleState,
+        if var cycleState = viewModel.historyTapCycleState,
            cycleState.candidateIds == topIds,
            now.timeIntervalSince(cycleState.timestamp) <= tapCycleMaxInterval,
            centerDistanceMeters(from: cycleState.anchor, to: tapCoordinate) <= allowedAnchorDistance {
@@ -1915,12 +2085,12 @@ struct DashboardView: View {
             cycleState.nextIndex = (cycleState.nextIndex + 1) % cycleState.candidateIds.count
             cycleState.anchor = tapCoordinate
             cycleState.timestamp = now
-            historyTapCycleState = cycleState
+            viewModel.historyTapCycleState = cycleState
             return selectedId
         }
 
         // First tap in a cluster selects the nearest route.
-        historyTapCycleState = HistoryRouteTapCycleState(
+        viewModel.historyTapCycleState = HistoryRouteTapCycleState(
             anchor: tapCoordinate,
             timestamp: now,
             candidateIds: topIds,
@@ -1968,7 +2138,7 @@ struct DashboardView: View {
     }
     
     private func buildHistorySelection(for driveId: UUID) -> HistoryRouteSelection? {
-        guard let drive = allDrives.first(where: { $0.id == driveId }) else { return nil }
+        guard let drive = fetchDrive(by: driveId) else { return nil }
         let title = historyRouteTitle(for: drive)
         let timeRange = formattedTimeRange(for: drive)
         
@@ -1986,6 +2156,15 @@ struct DashboardView: View {
             maxSpeedMPH: drive.maxSpeedMPH,
             gForceCounts: counts
         )
+    }
+
+    private func fetchDrive(by driveId: UUID) -> Drive? {
+        let descriptor = FetchDescriptor<Drive>(
+            predicate: #Predicate<Drive> { drive in
+                drive.id == driveId
+            }
+        )
+        return try? modelContext.fetch(descriptor).first
     }
     
     private func historyRouteTitle(for drive: Drive) -> String {
@@ -2090,6 +2269,30 @@ private struct HistoryRouteTapCycleState {
     var timestamp: Date
     let candidateIds: [UUID]
     var nextIndex: Int
+}
+
+@MainActor
+private final class DashboardViewModel: ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+    let cameraRuntime = DashboardCameraRuntime()
+
+    var routeSyncTask: Task<Void, Never>?
+    var routeLagBeganAt: Date?
+    var lastRouteWatchdogRecoveryAt: Date = .distantPast
+
+    var historyCacheTask: Task<Void, Never>?
+    var routeFocusTask: Task<Void, Never>?
+    var lastFocusedRouteId: UUID?
+    var historyTapCycleState: HistoryRouteTapCycleState?
+}
+
+@MainActor
+private final class DashboardCameraRuntime {
+    var lastManualTrackingDisengageAt: Date?
+    var lastCameraUpdate: Date = .distantPast
+    var lastHeadingCameraUpdate: Date = .distantPast
+    var lastCourseHeading: Double = 0
+    var hasCourseHeading: Bool = false
 }
 
 // MARK: - Dwell Status Bubble

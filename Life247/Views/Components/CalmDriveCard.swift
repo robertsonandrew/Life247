@@ -37,8 +37,6 @@ struct CalmDriveCard: View {
     var onDelete: (() -> Void)?
     var onViewLogs: (() -> Void)?
     
-    @Query private var places: [Place]
-    
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Always visible: collapsed content

@@ -12,6 +12,7 @@ import CoreLocation
 enum TimelineItem: Identifiable {
     case drive(Drive, trace: [(coordinate: CLLocationCoordinate2D, speedMPH: Double)], maxSpeedMPH: Double, destinationName: String?)
     case stop(InferredStop)
+    case trip(TripGroup)
     
     var id: String {
         switch self {
@@ -19,6 +20,8 @@ enum TimelineItem: Identifiable {
             return "drive-\(drive.id.uuidString)"
         case .stop(let stop):
             return "stop-\(stop.id.uuidString)"
+        case .trip(let trip):
+            return "trip-\(trip.id.uuidString)"
         }
     }
     
@@ -29,6 +32,8 @@ enum TimelineItem: Identifiable {
             return drive.startTime
         case .stop(let stop):
             return stop.startTime
+        case .trip(let trip):
+            return trip.startTime
         }
     }
     
@@ -39,6 +44,8 @@ enum TimelineItem: Identifiable {
             return drive.endTime ?? drive.startTime
         case .stop(let stop):
             return stop.endTime
+        case .trip(let trip):
+            return trip.endTime
         }
     }
     
@@ -57,6 +64,45 @@ enum TimelineItem: Identifiable {
     var stopIcon: String? {
         if case .stop(let stop) = self { return stop.displayIcon }
         return nil
+    }
+}
+
+/// A grouped set of related drives (usually anchor-to-anchor, e.g. Home -> errands -> Home).
+struct TripGroup: Identifiable {
+    let id: UUID
+    let title: String
+    let items: [TimelineItem] // Child drive/stop items (no nested trips)
+    let driveCount: Int
+    let stopCount: Int
+    let totalDistanceMiles: Double
+    let totalDuration: TimeInterval
+    let totalDriveDuration: TimeInterval
+    let startTime: Date
+    let endTime: Date
+
+    var formattedDistance: String {
+        String(format: "%.1f mi", totalDistanceMiles)
+    }
+
+    var formattedTotalDuration: String {
+        Self.format(duration: totalDuration)
+    }
+
+    var formattedDriveDuration: String {
+        Self.format(duration: totalDriveDuration)
+    }
+
+    private static func format(duration: TimeInterval) -> String {
+        let minutes = Int(duration / 60)
+        if minutes < 60 {
+            return "\(minutes) min"
+        }
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        if remainingMinutes == 0 {
+            return "\(hours) hr"
+        }
+        return "\(hours) hr \(remainingMinutes) min"
     }
 }
 

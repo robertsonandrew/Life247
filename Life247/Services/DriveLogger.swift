@@ -22,11 +22,21 @@ final class DriveLogger {
     
     /// Attach the logger to a drive and model context
     func attach(to drive: Drive, context: ModelContext) {
+        let isSameDriveAttachment = (activeDrive?.id == drive.id)
+        let isReattach = !drive.logEntries.isEmpty
+
         self.activeDrive = drive
         self.modelContext = context
         self.nextSequenceNumber = (drive.logEntries.compactMap(\.sequenceNumber).max() ?? 0) + 1
-        
-        log(.system, type: "logger_attached", message: "DriveLogger attached to drive \(drive.shortId)")
+
+        // Avoid duplicate attach markers when reconfiguring logger state for the same drive.
+        guard !isSameDriveAttachment else { return }
+
+        if isReattach {
+            log(.system, type: "logger_reattached", message: "DriveLogger reattached to drive \(drive.shortId)")
+        } else {
+            log(.system, type: "logger_attached", message: "DriveLogger attached to drive \(drive.shortId)")
+        }
     }
     
     /// Detach from the current drive

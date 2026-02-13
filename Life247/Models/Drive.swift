@@ -57,6 +57,10 @@ final class Drive {
     // MARK: - Cached Computed Values (populated at finalization)
     var cachedMaxSpeedMPH: Double = 0
     
+    /// Cached sampled trace for history list rendering (JSON-encoded CachedTracePoint array).
+    /// Populated at finalization for new drives; lazy-backfilled on first access for existing drives.
+    var cachedTraceData: Data?
+    
     // MARK: - Geocoded Display Names (cached)
     var startNeighborhood: String?   // Cached neighborhood/area name for start
     var endNeighborhood: String?     // Cached neighborhood/area name for end
@@ -153,12 +157,17 @@ final class Drive {
         }
     }
     
-    private static var currentBatteryLevel: Float {
+    static func normalizedBatteryLevel(_ value: Float?) -> Float? {
+        guard let value, value.isFinite, (0.0...1.0).contains(value) else { return nil }
+        return value
+    }
+
+    private static var currentBatteryLevel: Float? {
         #if os(iOS)
         UIDevice.current.isBatteryMonitoringEnabled = true
-        return UIDevice.current.batteryLevel
+        return normalizedBatteryLevel(UIDevice.current.batteryLevel)
         #else
-        return -1
+        return nil
         #endif
     }
     
@@ -386,7 +395,7 @@ final class Drive {
     
     /// Minimum horizontal accuracy to accept a point (meters).
     /// Shared with DriveStateMachine for consistent filtering.
-    static let maxAccuracy: Double = 30.0
+    static let maxAccuracy: Double = DriveQualityPolicy.Accuracy.recordingMaxMeters
     
     /// Maximum reasonable speed to filter GPS spikes (meters/second) - ~150 mph
     private static let maxReasonableSpeed: Double = 67.0
@@ -501,6 +510,18 @@ final class Drive {
         
         // Pre-compute expensive values for fast access in history views
         cachedMaxSpeedMPH = points.map { $0.speedMPH }.max() ?? 0
+        cacheTraceData()
+    }
+    
+    /// Compute and persist the sampled trace so history tab doesn't re-sort on every load.
+    func cacheTraceData() {
+        let trace = computeTracePointsWithSpeed()
+        let encoded = trace.map {
+            CachedTracePoint(lat: $0.coordinate.latitude,
+                             lon: $0.coordinate.longitude,
+                             speed: $0.speedMPH)
+        }
+        cachedTraceData = try? JSONEncoder().encode(encoded)
     }
     
     // MARK: - Geocoding
@@ -566,4 +587,12 @@ final class Drive {
             return nil
         }
     }
+}
+
+// MARK: - Trace Cache Serialization
+
+struct CachedTracePoint: Codable {
+    let lat: Double
+    let lon: Double
+    let speed: Double
 }

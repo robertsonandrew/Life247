@@ -24,6 +24,12 @@ enum DriveEvent {
     
     /// New GPS location received
     case locationUpdate(CLLocation)
+
+    /// iOS paused location updates for power/conditions
+    case locationUpdatesPaused
+
+    /// iOS resumed location updates after a pause
+    case locationUpdatesResumed
     
     /// Significant location change triggered (wakes app)
     case significantLocationChange

@@ -20,6 +20,9 @@ struct HistoryView: View {
     @Query(sort: \Place.name)
     private var places: [Place]
     
+    @AppStorage("feature.history.tripGrouping.enabled")
+    private var tripGroupingEnabled = true
+    
     @State private var timeline: [TimelineItem] = []
     @State private var groupedTimeline: [(key: Date, value: [TimelineItem])] = []
     @State private var daySummaries: [Date: DaySummary] = [:]
@@ -45,6 +48,7 @@ struct HistoryView: View {
     
     // Track which drive cards are expanded (most recent pre-expanded)
     @State private var expandedDriveIDs: Set<UUID> = []
+    @State private var expandedTripIDs: Set<UUID> = []
     @State private var hasInitializedExpansion = false
     
     // Sharing state
@@ -58,28 +62,8 @@ struct HistoryView: View {
         driveLimit < drives.count
     }
 
-    /// Visible grouped items (paginated by drives, not items)
-    private var visibleGroupedItems: [(key: Date, value: [TimelineItem])] {
-        var driveCount = 0
-        var result: [(key: Date, value: [TimelineItem])] = []
-
-        for group in groupedTimeline {
-            if driveCount >= driveLimit { break }
-
-            var groupItems: [TimelineItem] = []
-            for item in group.value {
-                if driveCount >= driveLimit { break }
-                groupItems.append(item)
-                if case .drive = item { driveCount += 1 }
-            }
-
-            if !groupItems.isEmpty {
-                result.append((key: group.key, value: groupItems))
-            }
-        }
-
-        return result
-    }
+    /// Visible grouped items (paginated, pre-computed in rebuildTimeline)
+    @State private var visibleGroupedItems: [(key: Date, value: [TimelineItem])] = []
     
     var body: some View {
         Group {
@@ -100,6 +84,9 @@ struct HistoryView: View {
             scheduleRebuild()
         }
         .onChange(of: places.count) { _, _ in
+            scheduleRebuild()
+        }
+        .onChange(of: tripGroupingEnabled) { _, _ in
             scheduleRebuild()
         }
 
@@ -234,7 +221,7 @@ struct HistoryView: View {
                 .textCase(nil)
             }
             
-            if hasMore {
+            if hasMore && !isLoading {
                 Section {
                     HStack {
                         Spacer()
@@ -266,59 +253,184 @@ struct HistoryView: View {
     ) -> some View {
         switch item {
         case .drive(let drive, let trace, let maxSpeedMPH, let destinationName):
-            CalmDriveCard(
+            driveRow(
                 drive: drive,
                 trace: trace,
                 maxSpeedMPH: maxSpeedMPH,
                 destinationName: destinationName,
                 stopSummaryText: stopSummaryText,
                 stopCanSavePlace: stopCanSavePlace,
-                isExpanded: Binding(
-                    get: { expandedDriveIDs.contains(drive.id) },
-                    set: { newValue in
-                        if newValue {
-                            expandedDriveIDs.insert(drive.id)
-                        } else {
-                            expandedDriveIDs.remove(drive.id)
-                        }
-                    }
-                ),
-                onViewDetails: { selectedDrive = drive },
-                onSaveStop: onSaveStop,
-                onInspector: { inspectorDrive = drive },
-                onShare: {
-                    Task { await generateShareImage(for: drive) }
-                },
-                onDelete: {
-                    driveToDelete = drive
-                    showDeleteConfirmation = true
-                },
-                onViewLogs: { logsDrive = drive }
+                onSaveStop: onSaveStop
             )
 
             
         case .stop(let stop):
-            let frequentInfo = frequentStops.stopToCandidate[stop.id]
-            if stop.matchedPlace == nil, let frequentInfo {
-                SuggestedPlaceRowView(
-                    candidate: frequentInfo,
-                    durationText: stop.formattedDuration,
-                    onAdd: {
-                        placeSaveRequest = PlaceSaveRequest(coordinate: frequentInfo.coordinate)
+            stopRow(for: stop)
+
+        case .trip(let trip):
+            let isExpanded = expandedTripIDs.contains(trip.id)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(trip.title)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(tripTimeSummary(for: trip))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(tripMetricsSummary(for: trip))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                )
-            } else {
-                NavigationLink(destination: StopDetailView(stop: stop, frequentStopInfo: frequentInfo)) {
-                    StopRowView(
-                        stop: stop,
-                        frequentStopInfo: frequentInfo,
-                        onSavePlace: stop.matchedPlace == nil
-                            ? { placeSaveRequest = PlaceSaveRequest(coordinate: stop.location) }
-                            : nil
-                    )
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        toggleTripExpansion(trip.id)
+                    } label: {
+                        Image(systemName: expandedTripIDs.contains(trip.id) ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if isExpanded {
+                    let (tripItems, tripStopSummaries) = mergeStops(in: trip.items)
+                    VStack(spacing: 8) {
+                        ForEach(Array(tripItems.enumerated()), id: \.element.id) { index, childItem in
+                            let childStopSummaryText: String? = {
+                                if case .drive(let drive, _, _, _) = childItem {
+                                    return tripStopSummaries[drive.id]?.summaryText
+                                }
+                                return nil
+                            }()
+                            let childCanSavePlace: Bool = {
+                                if case .drive(let drive, _, _, _) = childItem {
+                                    return tripStopSummaries[drive.id]?.canSavePlace ?? false
+                                }
+                                return false
+                            }()
+                            let childSaveAction: (() -> Void)? = {
+                                if case .drive(let drive, _, _, _) = childItem,
+                                   let summary = tripStopSummaries[drive.id],
+                                   summary.canSavePlace {
+                                    return { placeSaveRequest = PlaceSaveRequest(coordinate: summary.coordinate) }
+                                }
+                                return nil
+                            }()
+
+                            switch childItem {
+                            case .drive(let drive, let trace, let maxSpeedMPH, let destinationName):
+                                driveRow(
+                                    drive: drive,
+                                    trace: trace,
+                                    maxSpeedMPH: maxSpeedMPH,
+                                    destinationName: destinationName,
+                                    stopSummaryText: childStopSummaryText,
+                                    stopCanSavePlace: childCanSavePlace,
+                                    onSaveStop: childSaveAction
+                                )
+                            case .stop(let stop):
+                                stopRow(for: stop)
+                            case .trip:
+                                EmptyView()
+                            }
+                        }
+                    }
+                    .padding(.leading, 8)
                 }
             }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .onTapGesture {
+                guard !isExpanded else { return }
+                toggleTripExpansion(trip.id)
+            }
         }
+    }
+
+    private func driveRow(
+        drive: Drive,
+        trace: [(coordinate: CLLocationCoordinate2D, speedMPH: Double)],
+        maxSpeedMPH: Double,
+        destinationName: String?,
+        stopSummaryText: String?,
+        stopCanSavePlace: Bool,
+        onSaveStop: (() -> Void)?
+    ) -> some View {
+        CalmDriveCard(
+            drive: drive,
+            trace: trace,
+            maxSpeedMPH: maxSpeedMPH,
+            destinationName: destinationName,
+            stopSummaryText: stopSummaryText,
+            stopCanSavePlace: stopCanSavePlace,
+            isExpanded: Binding(
+                get: { expandedDriveIDs.contains(drive.id) },
+                set: { newValue in
+                    if newValue {
+                        expandedDriveIDs.insert(drive.id)
+                    } else {
+                        expandedDriveIDs.remove(drive.id)
+                    }
+                }
+            ),
+            onViewDetails: { selectedDrive = drive },
+            onSaveStop: onSaveStop,
+            onInspector: { inspectorDrive = drive },
+            onShare: {
+                Task { await generateShareImage(for: drive) }
+            },
+            onDelete: {
+                driveToDelete = drive
+                showDeleteConfirmation = true
+            },
+            onViewLogs: { logsDrive = drive }
+        )
+    }
+
+    @ViewBuilder
+    private func stopRow(for stop: InferredStop) -> some View {
+        let frequentInfo = frequentStops.stopToCandidate[stop.id]
+        if stop.matchedPlace == nil, let frequentInfo {
+            SuggestedPlaceRowView(
+                candidate: frequentInfo,
+                durationText: stop.formattedDuration,
+                onAdd: {
+                    placeSaveRequest = PlaceSaveRequest(coordinate: frequentInfo.coordinate)
+                }
+            )
+        } else {
+            NavigationLink(destination: StopDetailView(stop: stop, frequentStopInfo: frequentInfo)) {
+                StopRowView(
+                    stop: stop,
+                    frequentStopInfo: frequentInfo,
+                    onSavePlace: stop.matchedPlace == nil
+                        ? { placeSaveRequest = PlaceSaveRequest(coordinate: stop.location) }
+                        : nil
+                )
+            }
+        }
+    }
+
+    private func toggleTripExpansion(_ tripID: UUID) {
+        if expandedTripIDs.contains(tripID) {
+            expandedTripIDs.remove(tripID)
+        } else {
+            expandedTripIDs.insert(tripID)
+        }
+    }
+
+    private func tripTimeSummary(for trip: TripGroup) -> String {
+        "\(trip.startTime.formatted(date: .omitted, time: .shortened)) → \(trip.endTime.formatted(date: .omitted, time: .shortened)) · \(trip.formattedTotalDuration)"
+    }
+
+    private func tripMetricsSummary(for trip: TripGroup) -> String {
+        "\(trip.driveCount) drive\(trip.driveCount == 1 ? "" : "s") · \(trip.stopCount) stop\(trip.stopCount == 1 ? "" : "s") · \(trip.formattedDistance)"
     }
 
     private func mergeStops(in items: [TimelineItem]) -> ([TimelineItem], [UUID: StopSummary]) {
@@ -401,14 +513,12 @@ struct HistoryView: View {
             let timeline = await TimelineBuilder.buildTimeline(
                 drives: drivesSnapshot,
                 places: placesSnapshot,
+                tripGroupingEnabled: tripGroupingEnabled,
                 limit: currentLimit
             )
             
             // Extract stops for analysis
-            let stops = timeline.compactMap { item -> InferredStop? in
-                if case .stop(let stop) = item { return stop }
-                return nil
-            }
+            let stops = Self.extractStops(from: timeline)
             
             // Analyze frequent stops
             let frequent = FrequentStopAnalyzer.analyze(
@@ -428,9 +538,11 @@ struct HistoryView: View {
             var summaries: [Date: DaySummary] = [:]
             for (day, dayItems) in grouped {
                 let driveCount = dayItems.reduce(into: 0) { acc, item in
-                    if case .drive = item { acc += 1 }
+                    acc += Self.driveCount(for: item)
                 }
-                let stopCount = dayItems.count - driveCount
+                let stopCount = dayItems.reduce(into: 0) { acc, item in
+                    acc += Self.stopCount(for: item)
+                }
                 summaries[day] = DaySummary(drives: driveCount, stops: stopCount)
             }
             
@@ -443,8 +555,80 @@ struct HistoryView: View {
             self.frequentStops = result.1
             self.groupedTimeline = result.2
             self.daySummaries = result.3
+            self.visibleGroupedItems = Self.paginateGroups(result.2, limit: driveLimit)
+            let visibleTripIDs = Set(result.0.compactMap { item -> UUID? in
+                if case .trip(let trip) = item {
+                    return trip.id
+                }
+                return nil
+            })
+            self.expandedTripIDs = self.expandedTripIDs.intersection(visibleTripIDs)
             self.isLoading = false
             self.isLoadingMore = false
+        }
+    }
+    
+    /// Paginate grouped timeline by drive count.
+    private nonisolated static func paginateGroups(
+        _ groups: [(key: Date, value: [TimelineItem])],
+        limit: Int
+    ) -> [(key: Date, value: [TimelineItem])] {
+        var visibleDriveCount = 0
+        var result: [(key: Date, value: [TimelineItem])] = []
+
+        for group in groups {
+            if visibleDriveCount >= limit { break }
+            var groupItems: [TimelineItem] = []
+            for item in group.value {
+                if visibleDriveCount >= limit { break }
+                groupItems.append(item)
+                visibleDriveCount += driveCount(for: item)
+            }
+            if !groupItems.isEmpty {
+                result.append((key: group.key, value: groupItems))
+            }
+        }
+        return result
+    }
+
+    private nonisolated static func driveCount(for item: TimelineItem) -> Int {
+        switch item {
+        case .drive:
+            return 1
+        case .stop:
+            return 0
+        case .trip(let trip):
+            return trip.items.reduce(into: 0) { acc, child in
+                acc += driveCount(for: child)
+            }
+        }
+    }
+
+    private nonisolated static func stopCount(for item: TimelineItem) -> Int {
+        switch item {
+        case .drive:
+            return 0
+        case .stop:
+            return 1
+        case .trip(let trip):
+            return trip.items.reduce(into: 0) { acc, child in
+                acc += stopCount(for: child)
+            }
+        }
+    }
+
+    private nonisolated static func extractStops(from items: [TimelineItem]) -> [InferredStop] {
+        items.flatMap(extractStops(from:))
+    }
+
+    private nonisolated static func extractStops(from item: TimelineItem) -> [InferredStop] {
+        switch item {
+        case .stop(let stop):
+            return [stop]
+        case .trip(let trip):
+            return extractStops(from: trip.items)
+        case .drive:
+            return []
         }
     }
 

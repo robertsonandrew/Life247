@@ -24,9 +24,6 @@ final class LocationFilter: ObservableObject {
     
     // MARK: - Configuration
     
-    /// Maximum acceptable horizontal accuracy (meters)
-    private let maxAccuracy: CLLocationAccuracy = 25.0
-    
     /// Maximum age for accepting a location (seconds)
     private let maxLocationAge: TimeInterval = 12.0
     
@@ -72,7 +69,7 @@ final class LocationFilter: ObservableObject {
         }
         
         // 2. Accuracy gating (relaxed in low-power mode for wake events)
-        let accuracyLimit = isHighAccuracyMode ? maxAccuracy : 100.0
+        let accuracyLimit = DriveQualityPolicy.Accuracy.filterLimit(isHighAccuracyMode: isHighAccuracyMode)
         if location.horizontalAccuracy > accuracyLimit || location.horizontalAccuracy < 0 {
             logger.debug("Rejected low-accuracy location (accuracy: \(String(format: "%.1f", location.horizontalAccuracy))m)")
             return

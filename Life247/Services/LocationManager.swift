@@ -39,6 +39,12 @@ final class LocationManager: NSObject, ObservableObject {
     
     /// Current location accuracy mode
     private(set) var isHighAccuracyMode: Bool = false
+
+    /// Source-side heading throttling to avoid over-publishing compass updates.
+    private let minHeadingPublishInterval: TimeInterval = 0.10
+    private let minHeadingDeltaDegrees: CLLocationDirection = 1.5
+    private var lastPublishedHeadingAt: Date = .distantPast
+    private var lastPublishedHeadingDegrees: CLLocationDirection?
     
     // MARK: - Initialization
     
@@ -177,6 +183,8 @@ final class LocationManager: NSObject, ObservableObject {
         
         // Start compass updates if available (for stopped-state puck orientation)
         if CLLocationManager.headingAvailable() {
+            lastPublishedHeadingAt = .distantPast
+            lastPublishedHeadingDegrees = nil
             locationManager.startUpdatingHeading()
         }
         
@@ -195,6 +203,8 @@ final class LocationManager: NSObject, ObservableObject {
             locationManager.pausesLocationUpdatesAutomatically = true
         }
         currentHeading = nil
+        lastPublishedHeadingAt = .distantPast
+        lastPublishedHeadingDegrees = nil
         isHighAccuracyMode = false
         
         // Ensure SLC is still running
@@ -343,6 +353,47 @@ final class LocationManager: NSObject, ObservableObject {
             }
         }
     }
+
+    @MainActor
+    private func shouldPublishHeading(_ heading: CLHeading) -> Bool {
+        guard let headingDegrees = preferredHeadingDegrees(from: heading) else { return false }
+        let now = Date()
+
+        guard now.timeIntervalSince(lastPublishedHeadingAt) >= minHeadingPublishInterval else {
+            return false
+        }
+
+        if let lastPublishedHeadingDegrees {
+            let delta = abs(shortestHeadingDelta(from: lastPublishedHeadingDegrees, to: headingDegrees))
+            guard delta >= minHeadingDeltaDegrees else { return false }
+        }
+
+        lastPublishedHeadingAt = now
+        lastPublishedHeadingDegrees = headingDegrees
+        return true
+    }
+
+    private func preferredHeadingDegrees(from heading: CLHeading) -> CLLocationDirection? {
+        if heading.trueHeading >= 0 {
+            return normalizedHeading(heading.trueHeading)
+        }
+        if heading.magneticHeading >= 0 {
+            return normalizedHeading(heading.magneticHeading)
+        }
+        return nil
+    }
+
+    private func normalizedHeading(_ value: CLLocationDirection) -> CLLocationDirection {
+        let normalized = value.truncatingRemainder(dividingBy: 360)
+        return normalized < 0 ? normalized + 360 : normalized
+    }
+
+    private func shortestHeadingDelta(from: CLLocationDirection, to: CLLocationDirection) -> CLLocationDirection {
+        var delta = normalizedHeading(to) - normalizedHeading(from)
+        if delta > 180 { delta -= 360 }
+        if delta < -180 { delta += 360 }
+        return delta
+    }
 }
 
 // MARK: - CLLocationManagerDelegate
@@ -481,6 +532,7 @@ extension LocationManager: CLLocationManagerDelegate {
                 logger.debug("Heading update ignored: calibration required")
                 return
             }
+            guard shouldPublishHeading(newHeading) else { return }
             currentHeading = newHeading
         }
     }
@@ -488,6 +540,20 @@ extension LocationManager: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         Task { @MainActor in
             logger.error("Location manager error: \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated func locationManagerDidPauseLocationUpdates(_ manager: CLLocationManager) {
+        Task { @MainActor in
+            logger.info("Location updates paused by iOS")
+            eventSink?.handle(.locationUpdatesPaused)
+        }
+    }
+
+    nonisolated func locationManagerDidResumeLocationUpdates(_ manager: CLLocationManager) {
+        Task { @MainActor in
+            logger.info("Location updates resumed by iOS")
+            eventSink?.handle(.locationUpdatesResumed)
         }
     }
 

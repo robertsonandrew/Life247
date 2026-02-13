@@ -98,13 +98,13 @@ struct ContentView: View {
                 .zIndex(selectedTab == .map ? 1 : 0)
                 .allowsHitTesting(selectedTab == .map)
                 
-                // History and Settings are conditionally rendered
-                if selectedTab == .history {
-                    NavigationStack {
-                        HistoryView()
-                    }
-                    .zIndex(2)
+                // Keep history alive across tab switches to avoid repeated timeline cold-builds.
+                NavigationStack {
+                    HistoryView()
                 }
+                .opacity(selectedTab == .history ? 1 : 0)
+                .zIndex(selectedTab == .history ? 2 : 0)
+                .allowsHitTesting(selectedTab == .history)
                 
                 if selectedTab == .settings {
                     SettingsView()

@@ -35,6 +35,14 @@ final class DriveStateMachine {
     /// Speed threshold to confirm driving (mph)
     private let drivingConfirmationSpeed: Double = 10.0
 
+    /// Additional corroboration for GPS-only starts in background.
+    /// Helps suppress stationary false starts from noisy speed samples.
+    private let gpsOnlyStartMinDisplacementBaseMeters: Double = 65.0
+    private let gpsOnlyStartMaxDisplacementMeters: Double = 160.0
+    private let gpsOnlyStartAccuracyMultiplier: Double = 3.5
+    private let gpsOnlyStartMinBufferedSamples: Int = 8
+    private let gpsOnlyStartBlockLogIntervalSeconds: TimeInterval = 6.0
+
     /// Guard against stale/bogus initial location speeds on app open.
     /// Require speed ≥ maybeDrivingSpeedThreshold for a short window before entering maybeDriving.
     private let idleSpeedConfirmSeconds: TimeInterval = 2.0
@@ -89,13 +97,16 @@ final class DriveStateMachine {
     private let geofenceExitWakeWindowSeconds: TimeInterval = 45.0
     private let geofenceExitWakeConfirmSeconds: TimeInterval = 1.0
     private let geofenceExitWakeSpeedThresholdMPH: Double = 3.0
+
+    /// When background automotive motion is seen in idle, allow one-shot probing only
+    /// if speed evidence is near driving threshold to reduce walking-triggered GPS wakes.
+    private let backgroundAutomotiveProbeOneShotMinSpeedMPH: Double = 3.0
     
     /// Maximum drive duration before safety end (hours)
     private let safetyMaxDriveHours: Double = 8.0
     
     /// Minimum horizontal accuracy for valid GPS readings (meters).
-    /// References Drive.maxAccuracy for consistency.
-    private var minAccuracy: Double { Drive.maxAccuracy }
+    private var minAccuracy: Double { DriveQualityPolicy.Accuracy.recordingMaxMeters }
     
     // MARK: - User-Adjustable Settings (Clamped)
     
@@ -207,6 +218,7 @@ final class DriveStateMachine {
 
     // Idle → maybeDriving debouncer (prevents one-sample spikes from causing Detecting…)
     private var idleHighSpeedStart: Date?
+    private var lastGPSOnlyStartBlockLogAt: Date?
     
     // Track the reason for the upcoming drive start
     private var pendingStartReason: DriveStartReason?
@@ -258,13 +270,20 @@ final class DriveStateMachine {
     
     // Location buffer for maybeDriving state (captures points before drive is confirmed)
     // This ensures routes start at the actual departure point (e.g., saved place) not where speed was confirmed
-    private let locationBuffer = LocationBufferManager(maxSize: 30, minAccuracy: 30.0)
+    private let locationBuffer = LocationBufferManager(
+        maxSize: 30,
+        minAccuracy: DriveQualityPolicy.Accuracy.recordingMaxMeters
+    )
     
     // Motion manager for accelerometer control
     private weak var motionManager: MotionManager?
     
     // Location manager for one-shot GPS requests
     private weak var locationManager: LocationManager?
+
+    // Debounce repeated high-accuracy self-heal attempts when iOS drops mode unexpectedly.
+    private var lastHighAccuracyRecoveryAttemptAt: Date?
+    private let highAccuracyRecoveryDebounceInterval: TimeInterval = 20.0
     
     // MARK: - One-Shot GPS Debounce
     
@@ -326,6 +345,43 @@ final class DriveStateMachine {
         lastOneShotRequest = now
         logger.info("[ONE-SHOT] Requesting GPS for: \(reason)")
         locationManager?.requestOneShotLocation(reason: reason)
+    }
+
+    private var requiresHighAccuracyTracking: Bool {
+        switch state {
+        case .maybeDriving, .driving, .stopped, .pendingArrival:
+            return true
+        case .idle, .ended:
+            return false
+        }
+    }
+
+    /// Recover high-accuracy tracking if we are in a drive-active state and mode dropped out.
+    private func recoverHighAccuracyModeIfNeeded(trigger: String) {
+        guard requiresHighAccuracyTracking else { return }
+        guard let locationManager, !locationManager.isHighAccuracyMode else { return }
+
+        let now = Date()
+        if let lastAttempt = lastHighAccuracyRecoveryAttemptAt,
+           now.timeIntervalSince(lastAttempt) < highAccuracyRecoveryDebounceInterval {
+            return
+        }
+        lastHighAccuracyRecoveryAttemptAt = now
+
+        let appState = UIApplication.shared.applicationState == .background ? "background" : "foreground"
+        logger.warning("[GPS-MODE] High-accuracy OFF while state=\(self.state.rawValue); recovering (trigger=\(trigger))")
+        driveLogger.log(
+            .anomaly,
+            type: "high_accuracy_recovery",
+            message: "Recovered high-accuracy mode",
+            metadata: [
+                "state": state.rawValue,
+                "trigger": trigger,
+                "appState": appState
+            ]
+        )
+
+        locationManager.enableHighAccuracy(reason: "driving")
     }
 
     private func setPendingStartReason(_ reason: DriveStartReason, at timestamp: Date = Date()) {
@@ -472,6 +528,14 @@ final class DriveStateMachine {
             logger.error("[PERSIST] Failed to save on background: \(error.localizedDescription)")
         }
     }
+
+    private func handleLocationUpdatesPaused() {
+        driveLogger.logLocationServicesPaused(true)
+    }
+
+    private func handleLocationUpdatesResumed() {
+        driveLogger.logLocationServicesPaused(false)
+    }
     
     // MARK: - Cold-Start Recovery
     
@@ -582,6 +646,9 @@ final class DriveStateMachine {
         activeRouteCoordinates = drive.pointsChronological.map { $0.coordinate }
         routePointVersion &+= 1
         state = .driving
+        recentLocations.removeAll()
+        lastGPSOnlyStartBlockLogAt = nil
+        stoppedResumeCandidateStart = nil
         pendingRecoveryDrive = nil
         
         // Restore stopped state if the drive was stopped
@@ -598,8 +665,14 @@ final class DriveStateMachine {
             }
             logger.info("[COLDSTART] Resumed in stopped state (remaining: \(Int(remaining))s)")
         } else {
+            placeVisitManager.endActivePlaceVisitForDeparture()
             startSafetyTimer()
         }
+
+        // Cold-start resume bypasses normal enterState(...) hooks.
+        // Ensure the drive tracking reason owns high-accuracy mode.
+        locationManager?.enableHighAccuracy(reason: "driving")
+        recoverHighAccuracyModeIfNeeded(trigger: "cold_start_resume")
         
         // Log for timeline consistency
         driveLogger.attach(to: drive, context: modelContext)
@@ -656,6 +729,10 @@ final class DriveStateMachine {
                 logger.info("[MOTION] notAutomotive state=\(self.state.rawValue)")
             case .motionOnFoot:
                 logger.info("[MOTION] onFoot state=\(self.state.rawValue)")
+            case .locationUpdatesPaused:
+                logger.info("[LOC] updates paused by iOS in state=\(self.state.rawValue)")
+            case .locationUpdatesResumed:
+                logger.info("[LOC] updates resumed by iOS in state=\(self.state.rawValue)")
             case .timerExpired(let kind):
                 logger.info("[TIMER] \(kind.rawValue) expired state=\(self.state.rawValue)")
             default:
@@ -677,6 +754,12 @@ final class DriveStateMachine {
             
         case .locationUpdate(let location):
             handleLocationUpdate(location)
+
+        case .locationUpdatesPaused:
+            handleLocationUpdatesPaused()
+
+        case .locationUpdatesResumed:
+            handleLocationUpdatesResumed()
             
         case .significantLocationChange:
             handleSignificantLocationChange()
@@ -696,6 +779,22 @@ final class DriveStateMachine {
         case .timerExpired(let kind):
             handleTimerExpired(kind)
         }
+    }
+
+    /// Records UI-level map tracking diagnostics on the active drive timeline.
+    /// This lets Drive Inspector correlate visual follow issues with tracking-mode changes.
+    func logMapTrackingEvent(
+        type: String,
+        message: String,
+        metadata: [String: String] = [:],
+        category: LogCategory = .trace
+    ) {
+        guard activeDrive != nil else { return }
+        var merged = stateSnapshotMetadata()
+        for (key, value) in metadata {
+            merged[key] = value
+        }
+        driveLogger.log(category, type: type, message: message, metadata: merged)
     }
     
     // MARK: - Event Handlers
@@ -753,9 +852,75 @@ final class DriveStateMachine {
                 hasRecentAutomotiveMotion = true
                 setPendingStartReason(.motionActivity)
                 logger.debug("[MOTION] Automotive detected - awaiting GPS corroboration")
-                
-                // Request one-shot GPS to bootstrap detection
-                requestOneShotGPSIfNeeded(reason: "motion_automotive")
+
+                if UIApplication.shared.applicationState != .active {
+                    let now = Date()
+                    let geofenceWakeActive = isGeofenceExitWakeActive(at: now)
+                    let onFootRecent = isOnFootRecent(now)
+                    let staleAgeThreshold = geofenceWakeActive
+                        ? geofenceExitStartLocationMaxAgeSeconds
+                        : idleStartLocationMaxAgeSeconds
+                    let locationAgeSeconds = currentLocation.map { now.timeIntervalSince($0.timestamp) }
+                    let speedFresh = locationAgeSeconds.map { $0 <= staleAgeThreshold } ?? false
+                    let speedMPH = currentLocation.map { max(0, speedInMPH(for: $0)) } ?? 0
+                    let hasSpeedCorroboration = speedFresh && speedMPH >= maybeDrivingSpeedThreshold
+
+                    if geofenceWakeActive || hasSpeedCorroboration {
+                        logger.info("[MOTION] Background automotive corroborated - entering maybeDriving (speed \(String(format: "%.1f", speedMPH))mph, fresh=\(speedFresh), geofenceWake=\(geofenceWakeActive))")
+                        driveLogger.log(
+                            .decision,
+                            type: "background_motion_probe_allowed",
+                            message: "Background automotive probe corroborated",
+                            metadata: [
+                                "speedMPH": String(format: "%.1f", speedMPH),
+                                "speedFresh": String(speedFresh),
+                                "geofenceWake": String(geofenceWakeActive),
+                                "onFootRecent": String(onFootRecent),
+                                "confidence": confidenceStr
+                            ]
+                        )
+                        transition(to: .maybeDriving, trigger: "motion_automotive_background_probe_corroborated")
+                    } else {
+                        let shouldRequestOneShot = confidence == .high
+                            && !onFootRecent
+                            && speedFresh
+                            && speedMPH >= backgroundAutomotiveProbeOneShotMinSpeedMPH
+
+                        if shouldRequestOneShot {
+                            logger.info("[MOTION] Background automotive near-threshold - requesting one-shot (speed \(String(format: "%.1f", speedMPH))mph)")
+                            driveLogger.log(
+                                .decision,
+                                type: "background_motion_probe_one_shot",
+                                message: "Background automotive requesting one-shot corroboration",
+                                metadata: [
+                                    "speedMPH": String(format: "%.1f", speedMPH),
+                                    "speedFresh": String(speedFresh),
+                                    "geofenceWake": String(geofenceWakeActive),
+                                    "onFootRecent": String(onFootRecent),
+                                    "confidence": confidenceStr
+                                ]
+                            )
+                            requestOneShotGPSIfNeeded(reason: "motion_automotive_background_check")
+                        } else {
+                            logger.info("[MOTION] Background automotive blocked - insufficient corroboration (speed \(String(format: "%.1f", speedMPH))mph, fresh=\(speedFresh), geofenceWake=\(geofenceWakeActive), onFootRecent=\(onFootRecent))")
+                            driveLogger.log(
+                                .decision,
+                                type: "background_motion_probe_blocked",
+                                message: "Background automotive probe blocked",
+                                metadata: [
+                                    "speedMPH": String(format: "%.1f", speedMPH),
+                                    "speedFresh": String(speedFresh),
+                                    "geofenceWake": String(geofenceWakeActive),
+                                    "onFootRecent": String(onFootRecent),
+                                    "confidence": confidenceStr
+                                ]
+                            )
+                        }
+                    }
+                } else {
+                    // Foreground path stays conservative: corroborate with one-shot GPS first.
+                    requestOneShotGPSIfNeeded(reason: "motion_automotive")
+                }
             }
             
         case .maybeDriving:
@@ -858,11 +1023,11 @@ final class DriveStateMachine {
     }
     
     private func handleLocationUpdate(_ location: CLLocation) {
-        // Update current location for UI
-        currentLocation = location
-        
         // Feed location to accelerometer for coordinate transformation
         motionManager?.updateAccelerometerGPS(location)
+
+        // Active tracking should remain in high-accuracy mode; recover if it dropped.
+        recoverHighAccuracyModeIfNeeded(trigger: "location_update")
         
         // Filter low-accuracy readings
         guard location.horizontalAccuracy <= minAccuracy else {
@@ -873,6 +1038,10 @@ final class DriveStateMachine {
             }
             return
         }
+
+        // Update UI location only after it passes route-ingestion accuracy gate.
+        // This keeps puck movement aligned with accepted route points.
+        currentLocation = location
         
         // Compute speed with fallback when CLLocation.speed is invalid
         let speedMPH = speedInMPH(for: location)
@@ -936,9 +1105,26 @@ final class DriveStateMachine {
         case .maybeDriving:
             // Buffer location points so drive can start at actual departure point
             locationBuffer.add(location)
+
+            let now = Date()
+            let needsGPSOnlySpatialCorroboration = requiresExtraGPSOnlyStartCorroboration(now: now)
+            let gpsOnlySpatial = needsGPSOnlySpatialCorroboration
+                ? hasSufficientGPSOnlyStartDisplacement(location)
+                : (ok: true, displacement: 0.0, threshold: 0.0, samples: locationBuffer.count)
             
             // FAST-TRACK: High-confidence motion + speed threshold = immediate start
             if hasHighConfidenceMotion && speedMPH >= drivingConfirmationSpeed {
+                if needsGPSOnlySpatialCorroboration && !gpsOnlySpatial.ok {
+                    sustainedHighSpeedStart = nil
+                    logGPSOnlyStartBlockedIfNeeded(
+                        now: now,
+                        speedMPH: speedMPH,
+                        displacement: gpsOnlySpatial.displacement,
+                        threshold: gpsOnlySpatial.threshold,
+                        samples: gpsOnlySpatial.samples
+                    )
+                    return
+                }
                 logger.info("[FAST-TRACK] High-confidence motion + speed (\(String(format: "%.1f", speedMPH)) mph) → immediate start")
                 transition(to: .driving, trigger: "fast_track")
                 return
@@ -946,9 +1132,21 @@ final class DriveStateMachine {
             
             // Standard path: Check for sustained high speed
             if speedMPH >= drivingConfirmationSpeed {
+                if needsGPSOnlySpatialCorroboration && !gpsOnlySpatial.ok {
+                    sustainedHighSpeedStart = nil
+                    logGPSOnlyStartBlockedIfNeeded(
+                        now: now,
+                        speedMPH: speedMPH,
+                        displacement: gpsOnlySpatial.displacement,
+                        threshold: gpsOnlySpatial.threshold,
+                        samples: gpsOnlySpatial.samples
+                    )
+                    return
+                }
+
                 if sustainedHighSpeedStart == nil {
-                    sustainedHighSpeedStart = Date()
-                } else if Date().timeIntervalSince(sustainedHighSpeedStart!) >= drivingConfirmationDuration {
+                    sustainedHighSpeedStart = now
+                } else if now.timeIntervalSince(sustainedHighSpeedStart!) >= drivingConfirmationDuration {
                     transition(to: .driving, trigger: "speed_confirmed_sustained")
                 }
             } else {
@@ -1173,6 +1371,26 @@ final class DriveStateMachine {
             break
             
         case .pendingArrival:
+            // Keep recording route points during pending-arrival validation.
+            // Arrival checks can be false positives while still moving.
+            trackGPSGapIfNeeded(from: activeDrive?.latestPointTimestamp, to: location.timestamp)
+
+            if let drive = activeDrive {
+                let (added, reason, note) = drive.addPointWithReason(location)
+                if added {
+                    drive.locationSampleCount += 1
+                    appendActiveRouteCoordinate(location.coordinate)
+                    if let note {
+                        logPointAcceptanceNote(note)
+                    }
+                    routePointVersion &+= 1
+                    periodicallySaveIfNeeded()
+                } else if let reason {
+                    drive.droppedSampleCount += 1
+                    driveLogger.log(.location, type: "point_rejected", message: "\(reason.rawValue) acc=\(Int(location.horizontalAccuracy))m spd=\(String(format: "%.1f", location.speed))m/s")
+                }
+            }
+
             // If speed picks up significantly during validation window, it's a false arrival
             // (e.g. slowed down for gate, then accelerated)
             if speedMPH > 20.0 {
@@ -1201,6 +1419,11 @@ final class DriveStateMachine {
     private func trackGPSGapIfNeeded(from lastTimestamp: Date?, to currentTimestamp: Date) {
         guard let last = lastTimestamp else { return }
         let gap = currentTimestamp.timeIntervalSince(last)
+
+        // Track the largest observed inter-sample gap, regardless of anomaly threshold.
+        if let drive = activeDrive, gap > drive.maxGapBetweenSamples {
+            drive.maxGapBetweenSamples = gap
+        }
         
         // Log gaps longer than 60 seconds (shorter gaps are normal iOS background behavior)
         if gap > 60 {
@@ -1219,10 +1442,6 @@ final class DriveStateMachine {
                     "highAccuracy": String(locationManager?.isHighAccuracyMode ?? false)
                 ]
             )
-
-            if let drive = activeDrive, gap > drive.maxGapBetweenSamples {
-                drive.maxGapBetweenSamples = gap
-            }
         }
     }
 
@@ -1246,6 +1465,61 @@ final class DriveStateMachine {
                 ]
             )
         }
+    }
+
+    /// Whether a maybeDriving -> driving promotion is currently relying on GPS speed alone
+    /// in background conditions where speed noise is more likely.
+    private func requiresExtraGPSOnlyStartCorroboration(now: Date = Date()) -> Bool {
+        guard pendingStartReason == .gpsSpeed else { return false }
+        guard UIApplication.shared.applicationState != .active else { return false }
+        guard !hasRecentAutomotiveMotion else { return false }
+        guard !isGeofenceExitWakeActive(at: now) else { return false }
+        return true
+    }
+
+    /// Validate that maybeDriving produced enough spatial displacement to trust a GPS-only start.
+    private func hasSufficientGPSOnlyStartDisplacement(_ currentLocation: CLLocation) -> (ok: Bool, displacement: Double, threshold: Double, samples: Int) {
+        guard let first = locationBuffer.first else {
+            return (false, 0, gpsOnlyStartMinDisplacementBaseMeters, 0)
+        }
+
+        let samples = locationBuffer.count
+        let displacement = currentLocation.distance(from: first)
+        let dynamicThreshold = min(
+            gpsOnlyStartMaxDisplacementMeters,
+            max(
+                gpsOnlyStartMinDisplacementBaseMeters,
+                max(20, currentLocation.horizontalAccuracy) * gpsOnlyStartAccuracyMultiplier
+            )
+        )
+        let hasSamples = samples >= gpsOnlyStartMinBufferedSamples
+        return (hasSamples && displacement >= dynamicThreshold, displacement, dynamicThreshold, samples)
+    }
+
+    private func logGPSOnlyStartBlockedIfNeeded(
+        now: Date,
+        speedMPH: Double,
+        displacement: Double,
+        threshold: Double,
+        samples: Int
+    ) {
+        if let last = lastGPSOnlyStartBlockLogAt,
+           now.timeIntervalSince(last) < gpsOnlyStartBlockLogIntervalSeconds {
+            return
+        }
+        lastGPSOnlyStartBlockLogAt = now
+
+        driveLogger.log(
+            .decision,
+            type: "gps_speed_start_waiting_spatial",
+            message: "GPS-only start waiting for displacement corroboration",
+            metadata: [
+                "speedMPH": String(format: "%.1f", speedMPH),
+                "displacementMeters": String(format: "%.1f", displacement),
+                "requiredMeters": String(format: "%.1f", threshold),
+                "bufferSamples": String(samples)
+            ]
+        )
     }
     
     /// Compute speed for a location, with fallback to distance/time calculation
@@ -1574,7 +1848,6 @@ final class DriveStateMachine {
         case .pendingArrival:
             if state == .pendingArrival {
                 logger.info("Pending arrival validation complete - confirming arrival")
-                driveLogger.log(.decision, type: "arrival_confirmed", message: "Pending arrival validated via timer")
 
                 // Validate with current speed/location freshness before ending
                 if let location = currentLocation {
@@ -1599,6 +1872,7 @@ final class DriveStateMachine {
                                 message: "Accepted pending arrival (visit+stale fallback)",
                                 metadata: stateSnapshotMetadata()
                             )
+                            driveLogger.log(.decision, type: "arrival_confirmed", message: "Pending arrival validated via timer")
                             transition(to: .ended, trigger: "arrival_confirmed_visit_stale_fallback")
                             return
                         }
@@ -1655,6 +1929,7 @@ final class DriveStateMachine {
                 if pendingEndReason == nil {
                     pendingEndReason = .visitArrival
                 }
+                driveLogger.log(.decision, type: "arrival_confirmed", message: "Pending arrival validated via timer")
                 transition(to: .ended, trigger: "arrival_confirmed")
             }
         }
@@ -1828,12 +2103,16 @@ final class DriveStateMachine {
             lowSpeedCandidateStart = nil
             stoppedResumeCandidateStart = nil
             recentLocations.removeAll()
+            lastGPSOnlyStartBlockLogAt = nil
+            lastHighAccuracyRecoveryAttemptAt = nil
             // Reset one-shot debounce for next departure
             resetOneShotDebounce()
             // Release driving high-accuracy if we're not in post-drive monitoring
             if !isPostDriveMonitoring {
                 locationManager?.disableHighAccuracy(reason: "driving")
             }
+            // Release any cold-start bootstrap token from background recovery.
+            locationManager?.disableHighAccuracy(reason: "coldStart")
             
         case .pendingArrival:
             locationManager?.enableHighAccuracy(reason: "driving")
@@ -1850,11 +2129,13 @@ final class DriveStateMachine {
             locationManager?.enableHighAccuracy(reason: "driving")
             // Start verification timer
             startVerificationTimer()
+            lastGPSOnlyStartBlockLogAt = nil
             
         case .driving:
             // Driving starts: ensure we are not in an active dwell.
             placeVisitManager.endActivePlaceVisitForDeparture()
             recentLocations.removeAll()
+            lastGPSOnlyStartBlockLogAt = nil
             locationManager?.enableHighAccuracy(reason: "driving")
 
             // Create new drive if needed
@@ -1907,6 +2188,7 @@ final class DriveStateMachine {
                 isPostDriveMonitoring = false
                 postDriveMonitoringDeadline = nil
                 locationManager?.disableHighAccuracy(reason: "driving")
+                locationManager?.disableHighAccuracy(reason: "coldStart")
                 resetOneShotDebounce()
                 logger.info("[POST-DRIVE] Ended while backgrounded - disabled high-accuracy immediately")
             }
@@ -2060,6 +2342,7 @@ final class DriveStateMachine {
         isPostDriveMonitoring = false
         postDriveMonitoringDeadline = nil
         locationManager?.disableHighAccuracy(reason: "driving")
+        locationManager?.disableHighAccuracy(reason: "coldStart")
         resetOneShotDebounce()
         logger.info("[POST-DRIVE] Monitoring ended - disabled high-accuracy tracking")
 
@@ -2192,7 +2475,8 @@ final class DriveStateMachine {
         
         // Set end metadata
         drive.endReason = endReason
-        drive.batteryLevelAtEnd = UIDevice.current.batteryLevel
+        let batteryLevel = UIDevice.current.batteryLevel
+        drive.batteryLevelAtEnd = (0.0...1.0).contains(batteryLevel) ? batteryLevel : nil
         
         // Log the end decision
         let stoppedDuration = stoppedSince.map { Date().timeIntervalSince($0) } ?? 0
@@ -2213,6 +2497,15 @@ final class DriveStateMachine {
         driveLogger.detach()
         
         drive.finalize()
+
+        // Include the end-of-drive tail window in gap metrics.
+        if let endTime = drive.endTime,
+           let lastPointTimestamp = drive.latestPointTimestamp {
+            let tailGap = max(0, endTime.timeIntervalSince(lastPointTimestamp))
+            if tailGap > drive.maxGapBetweenSamples {
+                drive.maxGapBetweenSamples = tailGap
+            }
+        }
         
         // Send end notification with stats
         NotificationService.shared.sendDriveEnded(

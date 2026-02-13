@@ -60,7 +60,12 @@ struct Life247App: App {
             .onAppear {
                 performSetupOnce()
             }
+            .task {
+                performSetupOnce()
+            }
             .onChange(of: scenePhase) { _, newPhase in
+                performSetupOnce()
+
                 let stateName: String
                 switch newPhase {
                 case .active: stateName = "active"
@@ -69,6 +74,10 @@ struct Life247App: App {
                 @unknown default: stateName = "unknown"
                 }
                 stateMachine.handleAppStateChange(stateName)
+
+                if newPhase == .active {
+                    syncGeofences()
+                }
             }
         }
         .modelContainer(sharedModelContainer)

@@ -349,8 +349,29 @@ extension Drive {
         return result
     }
 
-    /// Simplified coordinate + speed array for route trace rendering
+    /// Simplified coordinate + speed array for route trace rendering.
+    /// Returns cached data if available; otherwise computes, caches (lazy backfill), and returns.
     var tracePointsWithSpeed: [(coordinate: CLLocationCoordinate2D, speedMPH: Double)] {
+        // 1. Check persisted cache
+        if let data = cachedTraceData,
+           let decoded = try? JSONDecoder().decode([CachedTracePoint].self, from: data) {
+            return decoded.map {
+                (CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon), $0.speed)
+            }
+        }
+        // 2. Cache miss — compute and lazy-backfill
+        let result = computeTracePointsWithSpeed()
+        let encoded = result.map {
+            CachedTracePoint(lat: $0.coordinate.latitude,
+                             lon: $0.coordinate.longitude,
+                             speed: $0.speedMPH)
+        }
+        cachedTraceData = try? JSONEncoder().encode(encoded)
+        return result
+    }
+
+    /// Compute sampled trace from full point set (expensive — sorts all points).
+    func computeTracePointsWithSpeed() -> [(coordinate: CLLocationCoordinate2D, speedMPH: Double)] {
         // Use simplified points for performance (every Nth point)
         let points = pointsChronological
         guard points.count > 2 else {

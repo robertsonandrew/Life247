@@ -739,8 +739,8 @@ struct DriveInspectorView: View {
         let deviceModel = drive.deviceModel
         let appVersion = drive.appVersion
         let lowPowerModeAtStart = drive.lowPowerModeAtStart
-        let batteryLevelAtStart = drive.batteryLevelAtStart
-        let batteryLevelAtEnd = drive.batteryLevelAtEnd
+        let batteryLevelAtStart = Drive.normalizedBatteryLevel(drive.batteryLevelAtStart)
+        let batteryLevelAtEnd = Drive.normalizedBatteryLevel(drive.batteryLevelAtEnd)
         let isActive = drive.isActive
 
         let durationSeconds = drive.duration
@@ -1026,8 +1026,8 @@ struct DriveInspectorView: View {
     }
     
     private var batteryString: String {
-        let start = drive.batteryLevelAtStart.map { "\(Int($0 * 100))%" } ?? "?"
-        let end = drive.batteryLevelAtEnd.map { "\(Int($0 * 100))%" } ?? "?"
+        let start = Drive.normalizedBatteryLevel(drive.batteryLevelAtStart).map { "\(Int($0 * 100))%" } ?? "?"
+        let end = Drive.normalizedBatteryLevel(drive.batteryLevelAtEnd).map { "\(Int($0 * 100))%" } ?? "?"
         return "\(start) → \(end)"
     }
     
