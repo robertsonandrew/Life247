@@ -497,17 +497,16 @@ final class DriveStateMachine {
     func handleAppStateChange(_ state: String) {
         logger.info("App state changed: \(state)")
         driveLogger.logAppStateChange(to: state)
+
+        // Post-drive grace is only reliable while active. Once we leave active state,
+        // tear it down deterministically so background GPS does not linger.
+        if state != "active", isPostDriveMonitoring {
+            endPostDriveMonitoring(trigger: "app_not_active")
+        }
         
         // Save drive data immediately when entering background to minimize loss on termination
         if state == "background" {
             saveActiveDriveIfNeeded()
-
-            // Avoid sticky background GPS indicator after a drive has ended.
-            // In background, post-drive grace cannot be relied on (app suspension),
-            // so end it immediately if we're already in `.ended`.
-            if self.state == .ended && isPostDriveMonitoring {
-                endPostDriveMonitoring(trigger: "app_backgrounded")
-            }
         } else if state == "active" {
             // Reconcile grace deadlines after returning from suspension.
             updatePostDriveMonitoringIfNeeded()
@@ -2081,6 +2080,11 @@ final class DriveStateMachine {
     private func enterState(_ state: DriveState) {
         switch state {
         case .idle:
+            if isPostDriveMonitoring && UIApplication.shared.applicationState != .active {
+                // If the app is not active by the time we re-enter idle, finish grace now.
+                // This prevents indefinite high-accuracy when background callbacks are sparse.
+                endPostDriveMonitoring(trigger: "idle_not_active")
+            }
             // Clean up any active drive reference (but don't delete)
             activeDrive = nil
             if !activeRouteCoordinates.isEmpty {
@@ -2174,6 +2178,8 @@ final class DriveStateMachine {
             let reason = pendingEndReason ?? .inactivityTimeout
             pendingEndReason = nil  // Consume
             finalizeDrive(endReason: reason)
+            // Any in-flight one-shot corroboration is no longer relevant once drive ended.
+            locationManager?.cancelOneShotLocation()
             // Cancel safety timer
             safetyTimer?.cancel()
             safetyTimer = nil

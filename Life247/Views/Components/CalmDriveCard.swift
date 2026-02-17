@@ -14,12 +14,18 @@ import UIKit
 /// Collapsed: Route trace silhouette + location + time + key metrics
 /// Expanded: Full map preview + secondary stats + CTA
 struct CalmDriveCard: View {
+    enum CardDensity {
+        case regular
+        case compact
+    }
+
     let drive: Drive
     let trace: [(coordinate: CLLocationCoordinate2D, speedMPH: Double)]
     let maxSpeedMPH: Double  // Pre-computed to avoid main-thread relationship fetch
     var destinationName: String? = nil
     var stopSummaryText: String? = nil
     var stopCanSavePlace: Bool = false
+    var cardDensity: CardDensity = .regular
     @Binding var isExpanded: Bool
 
     @AppStorage("showSpeedTrace") private var showSpeedTrace = true
@@ -36,6 +42,34 @@ struct CalmDriveCard: View {
     var onShare: (() -> Void)?
     var onDelete: (() -> Void)?
     var onViewLogs: (() -> Void)?
+
+    private var cardVerticalPadding: CGFloat {
+        cardDensity == .compact ? 9 : 12
+    }
+
+    private var cardHorizontalPadding: CGFloat {
+        cardDensity == .compact ? 12 : 16
+    }
+
+    private var cardCornerRadius: CGFloat {
+        cardDensity == .compact ? 10 : 12
+    }
+
+    private var cardBackgroundColor: Color {
+        cardDensity == .compact ? Color(.tertiarySystemGroupedBackground) : Color(.secondarySystemGroupedBackground)
+    }
+
+    private var cardShadowOpacity: Double {
+        cardDensity == .compact ? 0.02 : 0.04
+    }
+
+    private var traceWidth: CGFloat {
+        cardDensity == .compact ? 104 : 120
+    }
+
+    private var traceHeight: CGFloat {
+        cardDensity == .compact ? 40 : 44
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,11 +82,11 @@ struct CalmDriveCard: View {
             //         .transition(.opacity.combined(with: .move(edge: .top)))
             // }
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 16)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
+        .padding(.vertical, cardVerticalPadding)
+        .padding(.horizontal, cardHorizontalPadding)
+        .background(cardBackgroundColor)
+        .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+        .shadow(color: .black.opacity(cardShadowOpacity), radius: 2, y: 1)
         .contentShape(Rectangle())
         .onTapGesture {
             // withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -169,8 +203,8 @@ struct CalmDriveCard: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 120)
-        .frame(height: 44)
+        .frame(width: traceWidth)
+        .frame(height: traceHeight)
     }
 
     private var timeRow: some View {

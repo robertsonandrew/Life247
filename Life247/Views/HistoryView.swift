@@ -269,30 +269,38 @@ struct HistoryView: View {
 
         case .trip(let trip):
             let isExpanded = expandedTripIDs.contains(trip.id)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(trip.title)
                             .font(.headline)
                             .lineLimit(1)
                         Text(tripTimeSummary(for: trip))
-                            .font(.subheadline)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(tripMetricsSummary(for: trip))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        tripSummaryChips(for: trip)
                     }
 
                     Spacer(minLength: 0)
 
-                    Button {
-                        toggleTripExpansion(trip.id)
-                    } label: {
-                        Image(systemName: expandedTripIDs.contains(trip.id) ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
+                    Image(systemName: "chevron.down.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isExpanded)
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.04))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .onTapGesture {
+                    toggleTripExpansion(trip.id)
                 }
 
                 if isExpanded {
@@ -329,7 +337,8 @@ struct HistoryView: View {
                                     destinationName: destinationName,
                                     stopSummaryText: childStopSummaryText,
                                     stopCanSavePlace: childCanSavePlace,
-                                    onSaveStop: childSaveAction
+                                    onSaveStop: childSaveAction,
+                                    compactInTrip: true
                                 )
                             case .stop(let stop):
                                 stopRow(for: stop)
@@ -338,18 +347,32 @@ struct HistoryView: View {
                             }
                         }
                     }
-                    .padding(.leading, 8)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(uiColor: .tertiarySystemGroupedBackground).opacity(0.9))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                    )
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .top)),
+                            removal: .opacity.combined(with: .move(edge: .top))
+                        )
+                    )
                 }
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 16)
+            .padding(10)
             .background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
+            )
             .contentShape(RoundedRectangle(cornerRadius: 12))
-            .onTapGesture {
-                guard !isExpanded else { return }
-                toggleTripExpansion(trip.id)
-            }
+            .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isExpanded)
         }
     }
 
@@ -360,7 +383,8 @@ struct HistoryView: View {
         destinationName: String?,
         stopSummaryText: String?,
         stopCanSavePlace: Bool,
-        onSaveStop: (() -> Void)?
+        onSaveStop: (() -> Void)?,
+        compactInTrip: Bool = false
     ) -> some View {
         CalmDriveCard(
             drive: drive,
@@ -369,6 +393,7 @@ struct HistoryView: View {
             destinationName: destinationName,
             stopSummaryText: stopSummaryText,
             stopCanSavePlace: stopCanSavePlace,
+            cardDensity: compactInTrip ? .compact : .regular,
             isExpanded: Binding(
                 get: { expandedDriveIDs.contains(drive.id) },
                 set: { newValue in
@@ -418,10 +443,12 @@ struct HistoryView: View {
     }
 
     private func toggleTripExpansion(_ tripID: UUID) {
-        if expandedTripIDs.contains(tripID) {
-            expandedTripIDs.remove(tripID)
-        } else {
-            expandedTripIDs.insert(tripID)
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if expandedTripIDs.contains(tripID) {
+                expandedTripIDs.remove(tripID)
+            } else {
+                expandedTripIDs = [tripID]
+            }
         }
     }
 
@@ -429,8 +456,26 @@ struct HistoryView: View {
         "\(trip.startTime.formatted(date: .omitted, time: .shortened)) → \(trip.endTime.formatted(date: .omitted, time: .shortened)) · \(trip.formattedTotalDuration)"
     }
 
-    private func tripMetricsSummary(for trip: TripGroup) -> String {
-        "\(trip.driveCount) drive\(trip.driveCount == 1 ? "" : "s") · \(trip.stopCount) stop\(trip.stopCount == 1 ? "" : "s") · \(trip.formattedDistance)"
+    private func tripSummaryChips(for trip: TripGroup) -> some View {
+        HStack(spacing: 6) {
+            tripSummaryChip("\(trip.driveCount) drive\(trip.driveCount == 1 ? "" : "s")")
+            tripSummaryChip("\(trip.stopCount) stop\(trip.stopCount == 1 ? "" : "s")")
+            tripSummaryChip(trip.formattedDistance)
+            tripSummaryChip(trip.formattedTotalDuration)
+        }
+    }
+
+    private func tripSummaryChip(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.09))
+            )
     }
 
     private func mergeStops(in items: [TimelineItem]) -> ([TimelineItem], [UUID: StopSummary]) {

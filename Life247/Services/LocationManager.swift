@@ -118,7 +118,24 @@ final class LocationManager: NSObject, ObservableObject {
         logger.info("Stopping all location monitoring")
         locationManager.stopMonitoringSignificantLocationChanges()
         locationManager.stopMonitoringVisits()
+
+        // Force-stop any active GPS window and clear all high-accuracy intents.
+        oneShotTask?.cancel()
+        oneShotTask = nil
+        isOneShotActive = false
+        highAccuracyReasons.removeAll()
+
+        // Tear down active location/heading streams and clear indicator flags.
         locationManager.stopUpdatingLocation()
+        locationManager.stopUpdatingHeading()
+        if hasAlwaysAuthorization {
+            locationManager.showsBackgroundLocationIndicator = false
+            locationManager.allowsBackgroundLocationUpdates = false
+            locationManager.pausesLocationUpdatesAutomatically = true
+        }
+        currentHeading = nil
+        lastPublishedHeadingAt = .distantPast
+        lastPublishedHeadingDegrees = nil
         isMonitoring = false
         isHighAccuracyMode = false
     }
